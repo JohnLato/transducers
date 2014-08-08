@@ -154,7 +154,6 @@ tfold (Fold.Fold s0 f outf) = loop s0
         Nothing -> return $ outf s
         Just x -> lift (f s x) >>= loop
 
-{-# RULES "lower/yieldList" forall xs. yieldList xs = overR (ryieldList xs) #-}
 -- yieldList doesn't actually need the Monad constraint, but it's necessary for the yieldListR rule to work.
 yieldList :: Monad m => [a] -> Transducer i a m ()
 yieldList = mapM_ yield
@@ -187,19 +186,44 @@ foldOverR a0 streamf = case streamf instream of
         maybe RFinal (flip RStep ()) <$> tryAwait
 {-# NOINLINE [0] foldOverR #-}
 
-{-# RULES "overR/overR" forall (x :: forall t. (MonadTrans t, Monad (t m)) => RStream (t m) a -> RStream (t m) b) (y:: forall t. (MonadTrans t, Monad (t m)) => RStream (t m) b -> RStream (t m) c). (><>) (overR x) (overR y) = overR (y . x)  #-}
-{-# RULES "overR/foldOverR" forall (x :: forall t. (MonadTrans t, Monad (t m)) => RStream (t m) a -> RStream (t m) b) y0 (y:: forall t. (MonadTrans t, Monad (t m)) => RStream (t m) b -> RStream (t m) c). overR x ><> foldOverR y0 y = foldOverR y0 (y . x)  #-}
-{-# RULES "runTrans/foldOverR" forall o0 (f :: forall t. (MonadTrans t, Monad (t m)) => RStream (t m) a -> RStream (t m) b). runTrans (foldOverR o0 f) = runStreamF o0 f #-}
+-- Approach to fusion:
+--    first we transform a Transducer to a stream function
+--      'RStream m i -> RStream m o'
+--    which is lifted into a Transducer by 'overR'
+--    This is slightly lossy, so we can only perform it when we know
+--    something about how the transducer's return value is used.
+--
+--    next collapse composed 'overR/overR' pairs into a single 'overR'.
+--    This lets GHC see a bunch of composed, non-recursive stream
+--    transformers, which it can optimize well (a la stream fusion).
+--
+--    finally, if we see the driver running a 'foldOverR', collapse that
+--    too.
+--
+--    Currently this only works well if users stick to provided functions
+--    or manually lower to streams.  Work on general fusion is ongoing..
+{-# RULES
+"overR/overR" forall (x :: forall t. (MonadTrans t, Monad (t m)) => RStream (t m) a -> RStream (t m) b) (y:: forall t. (MonadTrans t, Monad (t m)) => RStream (t m) b -> RStream (t m) c). (><>) (overR x) (overR y) = overR (y . x)
 
-{-# RULES "lower/tmap" forall f. tmap f = overR (rmap f) #-}
-{-# RULES "lower/tfilter" forall p. tfilter p = overR (rfilter p) #-}
-{-# RULES "lower/mapM" forall f. mapM f = overR (rmapM (lift . f)) #-}
-{-# RULES "lower/tfold" forall f. tfold f = replaceFold f #-}
+"overR/foldOverR" forall (x :: forall t. (MonadTrans t, Monad (t m)) => RStream (t m) a -> RStream (t m) b) y0 (y:: forall t. (MonadTrans t, Monad (t m)) => RStream (t m) b -> RStream (t m) c). overR x ><> foldOverR y0 y = foldOverR y0 (y . x)
+
+"runTrans/foldOverR" forall o0 (f :: forall t. (MonadTrans t, Monad (t m)) => RStream (t m) a -> RStream (t m) b). runTrans (foldOverR o0 f) = runStreamF o0 f
+    #-}
+
+{-# RULES
+"lower/tmap" forall f. tmap f = overR (rmap f)
+"lower/tfilter" forall p. tfilter p = overR (rfilter p)
+"lower/mapM" forall f. mapM f = overR (rmapM (lift . f))
+"lower/yieldList" forall xs. yieldList xs = overR (ryieldList xs)
+"lower/tfold" forall f. tfold f = replaceFold f
+  -- I think I can do this more directly, maybe.
+    #-}
 
 -- so underR/overR means that Transducer is isomorphic to a stream transformer
 -- function.  But the stream version gives better fusion, while Transducers are
 -- probably easier to think about (and probably better for certain
 -- recursive constructs)
+-- I don't have much use for 'underR' ATM.  Maybe I'll think of something...
 underR :: (Functor m, Monad m) => Transducer i o m a -> RStream m i -> RStream m o
 underR m (RStream s0 stepInStream) = RStream (unTRS m,s0) getNext
   where
