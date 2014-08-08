@@ -156,10 +156,31 @@ tfold (Fold.Fold s0 f outf) = loop s0
         Nothing -> return $ outf s
         Just x -> lift (f s x) >>= loop
 
+tscanl :: (Functor m, Monad m) => Fold i m a -> Transducer i a m ()
+tscanl (Fold.Fold s0 f outf) = loop s0
+  where
+    loop s = do
+        i <- await
+        !s' <- lift $ f s i
+        yield $ outf s'
+        loop s'
+
 -- yieldList doesn't actually need the Monad constraint, but it's necessary for the yieldListR rule to work.
 yieldList :: Monad m => [a] -> Transducer i a m ()
 yieldList = mapM_ yield
 {-# INLINE [0] yieldList #-}
+
+-- TODO: all these should only happen in the first phases, by
+-- the last phase we want to undo them...
+{-# RULES
+"lower/tmap" forall f. tmap f = overR (rmap f)
+"lower/tfilter" forall p. tfilter p = overR (rfilter p)
+"lower/mapM" forall f. mapM f = overR (rmapM (lift . f))
+"lower/yieldList" forall xs. yieldList xs = overR (ryieldList xs)
+"lower/tfold" forall f. tfold f = replaceFold f
+  -- I think I can do this more directly, maybe.
+"lower/tscanl" forall f. tscanl f = overR (rfold f)
+    #-}
 
 --------------------------------------------------
 -- concat/flatten-type things
@@ -238,15 +259,6 @@ foldOverR a0 streamf = case streamf instream of
 "overR/foldOverR" forall (x :: forall t. (MonadTrans t, Monad (t m)) => RStream (t m) a -> RStream (t m) b) y0 (y:: forall t. (MonadTrans t, Monad (t m)) => RStream (t m) b -> RStream (t m) c). overR x ><> foldOverR y0 y = foldOverR y0 (y . x)
 
 "runTrans/foldOverR" forall o0 (f :: forall t. (MonadTrans t, Monad (t m)) => RStream (t m) a -> RStream (t m) b). runTrans (foldOverR o0 f) = runStreamF o0 f
-    #-}
-
-{-# RULES
-"lower/tmap" forall f. tmap f = overR (rmap f)
-"lower/tfilter" forall p. tfilter p = overR (rfilter p)
-"lower/mapM" forall f. mapM f = overR (rmapM (lift . f))
-"lower/yieldList" forall xs. yieldList xs = overR (ryieldList xs)
-"lower/tfold" forall f. tfold f = replaceFold f
-  -- I think I can do this more directly, maybe.
     #-}
 
 -- so underR/overR means that Transducer is isomorphic to a stream transformer
