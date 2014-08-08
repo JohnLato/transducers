@@ -21,6 +21,10 @@ module Transducers.Stream (
   ryieldList,
   rfold,
   runStreamF,
+
+  rflatten,
+  rflattenList,
+  rreplicate,
 ) where
 
 import Transducers.Fold (Fold)
@@ -101,6 +105,47 @@ rmapM f (RStream s0 step) = RStream s0 go
           Die err s' -> return $ Die err s'
           RFinal     -> return RFinal
 
+--------------------------------------------------
+-- flatteners
+
+{-# INLINE rreplicate #-}
+rreplicate :: Monad m => Int -> RStream m a -> RStream m a
+rreplicate n0 = rflatten (n0,) go
+  where
+    go (0,_) = RFinal
+    go (n,a) = RStep a (n-1,a)
+
+{-# INLINE rflattenList #-}
+rflattenList :: Monad m => RStream m [a] -> RStream m a
+rflattenList = rflatten id uncons
+  where
+    uncons [] = RFinal
+    uncons (x:xs) = RStep x xs
+
+-- use this instead of 'Either a (a,b)' to avoid the extra
+-- boxing of the tuple
+data FlattenState a b =
+    Outer a
+  | Inner a b
+
+{-# INLINE [1] rflatten #-}
+rflatten
+    :: Monad m => (a -> s) -> (s -> RStep s b)
+    -> RStream m a -> RStream m b
+rflatten mkS0 flattenStep (RStream s0 step) = RStream (Outer s0) go
+  where
+    {-# INLINE [0] go #-}
+    go (Outer s) = step s >>= \case
+        RStep a outer -> let x = mkS0 a
+                         in x `seq` return $ RSkip $ Inner outer x
+        RSkip s'   -> return $ RSkip $ Outer s'
+        Die   e s' -> return $ Die e $ Outer s'
+        RFinal     -> return $ RFinal
+    go (Inner outer s) = case flattenStep s of
+        RStep b s' -> return $ RStep b (Inner outer s')
+        RSkip s'   -> return $ RSkip (Inner outer s')
+        Die e s'   -> return $ Die e (Inner outer s')
+        RFinal     -> return $ RSkip $ Outer outer
 
 --------------------------------------------------
 -- Stream producers

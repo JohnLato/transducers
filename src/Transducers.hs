@@ -16,6 +16,7 @@ testIt :: (Functor m, MonadIO m) => Transducer Int String m ()
 testIt =
     tfilter (\x -> mod x 2 == 0)
     ><> tmap (fromIntegral :: Int -> Double)
+    ><> treplicate 3
     ><> tmap (show :: Double -> String)
     ><> mapM (\x -> x <$ liftIO (print (length x)))
 {-# INLINE testIt #-}

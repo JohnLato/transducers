@@ -27,6 +27,8 @@ module Transducers.Transducers (
   tfilter,
   mapM,
   tfold,
+  flatten,
+  treplicate,
 
   yieldList,
   runTrans,
@@ -41,8 +43,9 @@ import Transducers.Stream
 
 import Control.Applicative
 import Control.Exception
-import Control.Monad ((>=>), forever, liftM, when)
+import Control.Monad ((>=>), forever, liftM, when, replicateM_)
 import Control.Monad.Trans
+import qualified Data.Foldable as Foldable
 
 --------------------------------------------------
 -- types
@@ -158,6 +161,24 @@ tfold (Fold.Fold s0 f outf) = loop s0
 yieldList :: Monad m => [a] -> Transducer i a m ()
 yieldList = mapM_ yield
 {-# INLINE [0] yieldList #-}
+
+--------------------------------------------------
+-- concat/flatten-type things
+
+treplicate :: Monad m => Int -> Transducer i i m ()
+treplicate n = await >>= replicateM_ n . yield
+
+-- | If (t i) is already existing, this isn't as optimal as it could be.
+-- Need to add some enumFromTo/replicate/etc. functions so
+-- everything fuses away.
+flatten :: (Foldable.Foldable t, Monad m) => Transducer (t i) i m ()
+flatten = await >>= Foldable.mapM_ yield 
+{-# INLINE [0] flatten #-}
+
+{-# RULES
+"flatten/list" flatten = overR rflattenList
+"treplicate" forall n. treplicate n = overR (rreplicate n)
+    #-}
 
 --------------------------------------------------
 -- Fusion stuff
