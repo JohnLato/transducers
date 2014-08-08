@@ -4,9 +4,10 @@
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE ScopedTypeVariables #-}
+-- {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections #-}
-{-# LANGUAGE  ViewPatterns #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE ViewPatterns #-}
 
 {-# OPTIONS -Wall -fno-warn-unused-matches #-}
 module Transducers.Transducers (
@@ -61,6 +62,12 @@ newtype Transducer i o m a =
 
 instance MonadTrans (Transducer i o) where
     lift m = Trs $ fromView (Impure (TLift $ liftM return m))
+
+instance (Functor m, Monad m) => Fold.Folding (Transducer i o m) where
+    type Input (Transducer i o m) = i
+    type FMonad (Transducer i o m) = m
+    {-# INLINE liftFold #-}
+    liftFold = tfold
 
 --------------------------------------------------
 -- primitive API

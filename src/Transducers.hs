@@ -21,7 +21,7 @@ testIt =
 {-# INLINE testIt #-}
 
 runTest :: (MonadIO m, Functor m) => Transducer () () m ()
-runTest = yieldList [1,2,3] ><> testIt ><> tfold (Fold.mapM_ (liftIO . print))
+runTest = yieldList [1,2,3] ><> testIt ><> Fold.mapM_ (liftIO . print)
 {-# INLINE runTest #-}
 
 main :: IO ()
