@@ -25,6 +25,7 @@ module Transducers.Stream (
   rflatten,
   rflattenList,
   rreplicate,
+  runfold,
 ) where
 
 import Transducers.Fold (Fold)
@@ -114,6 +115,15 @@ rreplicate n0 = rflatten (n0,) go
   where
     go (0,_) = RFinal
     go (n,a) = RStep a (n-1,a)
+
+{-# INLINE runfold #-}
+runfold :: Monad m => (i -> s) -> (s -> Maybe (o,s))
+        -> RStream m i -> RStream m o
+runfold mkS unf = rflatten mkS step
+  where
+    step s = case unf s of
+        Just (o,s') -> RStep o s'
+        Nothing     -> RFinal
 
 {-# INLINE rflattenList #-}
 rflattenList :: Monad m => RStream m [a] -> RStream m a

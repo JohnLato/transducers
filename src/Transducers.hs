@@ -1,3 +1,5 @@
+{-# LANGUAGE TupleSections #-}
+
 {-# OPTIONS -ddump-to-file -ddump-simpl-iterations -ddump-rule-firings -ddump-simpl #-}
 {-# OPTIONS -Wall -fno-warn-unused-matches #-}
 module Transducers (
@@ -19,6 +21,9 @@ testIt =
     ><> treplicate 3
     ><> tmap (show :: Double -> String)
     ><> mapM (\x -> x <$ liftIO (print (length x)))
+    ><> unfold Just (fmap (,Nothing))
+          -- identity unfold, see if we can
+          -- remove it.  Yes we can!
 {-# INLINE testIt #-}
 
 runTest :: (MonadIO m, Functor m) => Transducer () () m ()

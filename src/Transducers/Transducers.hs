@@ -1,10 +1,8 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE RankNTypes #-}
--- {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE ViewPatterns #-}
@@ -29,6 +27,7 @@ module Transducers.Transducers (
   tfold,
   flatten,
   treplicate,
+  unfold,
 
   yieldList,
   runTrans,
@@ -168,6 +167,15 @@ yieldList = mapM_ yield
 treplicate :: Monad m => Int -> Transducer i i m ()
 treplicate n = await >>= replicateM_ n . yield
 
+unfold
+    :: Monad m => (i -> s) -> (s -> Maybe (o,s))
+    -> Transducer i o m ()
+unfold mkS unf = await >>= loop SPEC . mkS
+  where
+    loop !sPEC s = case unf s of
+        Just (o,s') -> yield o >> loop SPEC s'
+        Nothing -> return ()
+
 -- | If (t i) is already existing, this isn't as optimal as it could be.
 -- Need to add some enumFromTo/replicate/etc. functions so
 -- everything fuses away.
@@ -178,6 +186,7 @@ flatten = await >>= Foldable.mapM_ yield
 {-# RULES
 "flatten/list" flatten = overR rflattenList
 "treplicate" forall n. treplicate n = overR (rreplicate n)
+"unfold" forall mkS unf. unfold mkS unf = overR (runfold mkS unf)
     #-}
 
 --------------------------------------------------
