@@ -49,13 +49,13 @@ data SPEC = SPEC | SPEC2
 -- GHC can manage the extra constructor just fine.
 
 -- | Resumable stream
-data RStream m a =
-    forall s. RStream s (s -> m (RStep s a))
+data RStream e m a =
+    forall s. RStream s (s -> m (RStep e s a))
 
-data RStep s a = 
+data RStep e s a = 
     RStep a s
   | RSkip s
-  | Die SomeException s
+  | Die e s
   | RFinal
 
 --------------------------------------------------
@@ -65,7 +65,7 @@ data RStep s a =
 
 {-# INLINE [1] rmap #-}
 -- | map between streams
-rmap :: Monad m => (a -> b) -> RStream m a -> RStream m b
+rmap :: Monad m => (a -> b) -> RStream e m a -> RStream e m b
 rmap f (RStream s0 step) = RStream s0 go
   where
     {-# INLINE [0] go #-}
@@ -79,7 +79,7 @@ rmap f (RStream s0 step) = RStream s0 go
 
 {-# INLINE [1] rfilter #-}
 -- | filter a stream
-rfilter :: Monad m => (a -> Bool) -> RStream m a -> RStream m a
+rfilter :: Monad m => (a -> Bool) -> RStream e m a -> RStream e m a
 rfilter p (RStream s0 step) = RStream s0 go
   where
     {-# INLINE [0] go #-}
@@ -94,7 +94,7 @@ rfilter p (RStream s0 step) = RStream s0 go
 
 {-# INLINE [1] rmapM #-}
 -- | monadic map between streams
-rmapM :: Monad m => (a -> m b) -> RStream m a -> RStream m b
+rmapM :: Monad m => (a -> m b) -> RStream e m a -> RStream e m b
 rmapM f (RStream s0 step) = RStream s0 go
   where
     {-# INLINE [0] go #-}
@@ -110,7 +110,7 @@ rmapM f (RStream s0 step) = RStream s0 go
 -- flatteners
 
 {-# INLINE rreplicate #-}
-rreplicate :: Monad m => Int -> RStream m a -> RStream m a
+rreplicate :: Monad m => Int -> RStream e m a -> RStream e m a
 rreplicate n0 = rflatten (n0,) go
   where
     go (0,_) = RFinal
@@ -118,7 +118,7 @@ rreplicate n0 = rflatten (n0,) go
 
 {-# INLINE runfold #-}
 runfold :: Monad m => (i -> s) -> (s -> Maybe (o,s))
-        -> RStream m i -> RStream m o
+        -> RStream e m i -> RStream e m o
 runfold mkS unf = rflatten mkS step
   where
     step s = case unf s of
@@ -126,7 +126,7 @@ runfold mkS unf = rflatten mkS step
         Nothing     -> RFinal
 
 {-# INLINE rflattenList #-}
-rflattenList :: Monad m => RStream m [a] -> RStream m a
+rflattenList :: Monad m => RStream e m [a] -> RStream e m a
 rflattenList = rflatten id uncons
   where
     uncons [] = RFinal
@@ -140,8 +140,8 @@ data FlattenState a b =
 
 {-# INLINE [1] rflatten #-}
 rflatten
-    :: Monad m => (a -> s) -> (s -> RStep s b)
-    -> RStream m a -> RStream m b
+    :: Monad m => (a -> s) -> (s -> RStep e s b)
+    -> RStream e m a -> RStream e m b
 rflatten mkS0 flattenStep (RStream s0 step) = RStream (Outer s0) go
   where
     {-# INLINE [0] go #-}
@@ -160,13 +160,13 @@ rflatten mkS0 flattenStep (RStream s0 step) = RStream (Outer s0) go
 --------------------------------------------------
 -- Stream producers
 
-emptyStream :: Monad m => RStream m a
+emptyStream :: Monad m => RStream e m a
 emptyStream = RStream () (\() -> return RFinal)
 
 -- | ryieldList takes an input stream that is entirely ignored.
 -- This is so it can use the same fusion functions as the regular
 -- stream transformers
-ryieldList :: Monad m => [a] -> RStream m i -> RStream m a
+ryieldList :: Monad m => [a] -> RStream e m i -> RStream e m a
 ryieldList xs0 _ = RStream xs0 go
   where
     go (x:xs) = return $ RStep x xs
@@ -177,7 +177,7 @@ ryieldList xs0 _ = RStream xs0 go
 {-# INLINE [1] rfold #-}
 rfold
     :: (MonadTrans t, Monad m, Monad (t m))
-    => Fold i m a -> RStream (t m) i -> RStream (t m) a
+    => Fold i m a -> RStream e (t m) i -> RStream e (t m) a
 rfold (Fold.Fold s0 ff fout) (RStream r0 rstep) = RStream (s0,r0) go
   where
     {-# INLINE [0] go #-}
@@ -190,11 +190,13 @@ rfold (Fold.Fold s0 ff fout) (RStream r0 rstep) = RStream (s0,r0) go
         Die e s' -> return $ Die e (fstate,s')
         RFinal   -> return RFinal
 
--- run a stream and return the last value.  This function cannot fail because
--- it has an initial value, but it returns a Maybe so the type matches with
--- runTrans
+-- run a stream and return the last value.
 {-# INLINE [1] runStreamF #-}
-runStreamF :: Monad m => o -> (forall t. (MonadTrans t, Monad (t m)) => RStream (t m) i -> RStream (t m) o) -> m (Maybe o)
+runStreamF
+    :: (Monad m, Exception e)
+    => o
+    -> (forall t. (MonadTrans t, Monad (t m)) => RStream e (t m) i -> RStream e (t m) o)
+    -> m o
 runStreamF o0 streamf = case streamf emptyStream of
     RStream s0 step -> loop SPEC o0 s0
       where
@@ -202,4 +204,4 @@ runStreamF o0 streamf = case streamf emptyStream of
           RStep x s' -> loop SPEC x s'
           RSkip s'   -> loop SPEC prev s'
           Die e _    -> throw e
-          RFinal     -> return $ Just prev
+          RFinal     -> return prev

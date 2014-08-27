@@ -22,7 +22,7 @@ parF (Fold s0 f mkOut) = Fold (return s0) step (>>= mkOut)
 
 --TODO: make a parR for streams
 
-parT :: Transducer i o IO a -> Transducer i o IO a
+parT :: Transducer e i o IO a -> Transducer e i o IO a
 parT (Trs tr0) = careful tr0
   where
     drive x = case toView x of

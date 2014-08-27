@@ -11,9 +11,10 @@ import Transducers.Fold as Fold
 import Transducers.Transducers as M
 
 import Control.Applicative
+import Control.Exception (SomeException)
 import Control.Monad.Trans
 
-testIt :: (Functor m, MonadIO m) => Transducer Int String m ()
+testIt :: (Functor m, MonadIO m) => Transducer e Int String m ()
 testIt =
     tfilter (\x -> mod x 2 == 0)
     ><> tmap (fromIntegral :: Int -> Double)
@@ -25,7 +26,7 @@ testIt =
           -- remove it.  Yes we can!
 {-# INLINE testIt #-}
 
-runTest :: (MonadIO m, Functor m) => Transducer () () m ()
+runTest :: (MonadIO m, Functor m) => Transducer SomeException () () m ()
 runTest = yieldList [1,2,3] ><> testIt ><> Fold.mapM_ (liftIO . print)
 {-# INLINE runTest #-}
 

@@ -57,54 +57,54 @@ import qualified Data.Foldable as Foldable
 -- types
 
 -- Functor to represent the main Transducer type
-data TransducerF i o m a =
+data TransducerF e i o m a =
     Try (Maybe i -> a)
   | Yield o a
-  | Panic SomeException a
+  | Panic e a
   | TLift (m a)  -- is this ok?  Maybe it should be moved to FreeMonad?
   deriving Functor
 
-newtype Transducer i o m a =
-    Trs { unTRS :: FreeMonad (TransducerF i o m) a}
+newtype Transducer e i o m a =
+    Trs { unTRS :: FreeMonad (TransducerF e i o m) a}
     deriving (Functor, Applicative, Monad)
 
-instance MonadTrans (Transducer i o) where
+instance MonadTrans (Transducer e i o) where
     lift m = Trs $ fromView (Impure (TLift $ liftM return m))
 
-instance MonadIO m => MonadIO (Transducer i o m) where
+instance MonadIO m => MonadIO (Transducer e i o m) where
     liftIO = lift . liftIO
 
-instance (Functor m, Monad m) => Fold.Folding (Transducer i o m) where
-    type Input (Transducer i o m) = i
-    type FMonad (Transducer i o m) = m
+instance (Functor m, Monad m) => Fold.Folding (Transducer e i o m) where
+    type Input (Transducer e i o m) = i
+    type FMonad (Transducer e i o m) = m
     {-# INLINE liftFold #-}
     liftFold = tfold
 
 --------------------------------------------------
 -- primitive API
 
-yield :: o -> Transducer i o m ()
+yield :: o -> Transducer e i o m ()
 yield x = Trs . fromView $ Impure $ Yield x (return ())
 
-await :: Transducer i o m i
+await :: Transducer e i o m i
 await = Trs . fromView . Impure . Try $ maybe (unTRS await) return
 
-tryAwait :: Transducer i o m (Maybe i)
+tryAwait :: Transducer e i o m (Maybe i)
 tryAwait = Trs . fromView $ Impure (Try return)
 
-panic :: (Exception e) => e -> Transducer i o m ()
-panic e = Trs . fromView . Impure $ Panic (toException e) (return ())
+panic :: e -> Transducer e i o m ()
+panic e = Trs . fromView . Impure $ Panic e (return ())
 
 --------------------------------------------------
 -- composition
 
 infixr 9 ><>, <><
 
-(<><) :: (Functor m) => Transducer b c m y -> Transducer a b m x -> Transducer a c m y
+(<><) :: (Functor m) => Transducer e b c m y -> Transducer e a b m x -> Transducer e a c m y
 r <>< l = l ><> r
 {-# INLINE (<><) #-}
 
-(><>) :: (Functor m) => Transducer a b m x -> Transducer b c m y -> Transducer a c m y
+(><>) :: (Functor m) => Transducer e a b m x -> Transducer e b c m y -> Transducer e a c m y
 l0' ><> r0' = Trs $ go (unTRS l0') (unTRS r0')
   where
     go l0 r0 = case (toView l0, toView r0) of
@@ -122,8 +122,8 @@ l0' ><> r0' = Trs $ go (unTRS l0') (unTRS r0')
 
 dropInputs
     :: (Functor m)
-    => FreeMonad (TransducerF i o m) a
-    -> FreeMonad (TransducerF x o m) a
+    => FreeMonad (TransducerF e i o m) a
+    -> FreeMonad (TransducerF e x o m) a
 dropInputs t = case toView t of
     Pure a -> return a
     Impure (Try f)   -> dropInputs $ f Nothing
@@ -133,8 +133,8 @@ dropInputs t = case toView t of
 
 dropOutputs
     :: Functor m
-    => FreeMonad (TransducerF i o m) a
-    -> FreeMonad (TransducerF i x m) a
+    => FreeMonad (TransducerF e i o m) a
+    -> FreeMonad (TransducerF e i x m) a
 dropOutputs t = case toView t of
     Pure a -> return a
     Impure (Yield _ a) -> dropOutputs a
@@ -145,23 +145,23 @@ dropOutputs t = case toView t of
 --------------------------------------------------
 -- higher-level API
 
-tmap :: (Functor m,Monad m) => (i -> o) -> Transducer i o m ()
+tmap :: (Functor m,Monad m) => (i -> o) -> Transducer e i o m ()
 tmap f = foreach $ yield . f
 
-tfilter :: (Functor m, Monad m) => (i -> Bool) -> Transducer i i m ()
+tfilter :: (Functor m, Monad m) => (i -> Bool) -> Transducer e i i m ()
 tfilter p = foreach $ \x -> when (p x) (yield x)
 
-mapM :: Monad m => (i -> m o) -> Transducer i o m ()
+mapM :: Monad m => (i -> m o) -> Transducer e i o m ()
 mapM f = foreach $ lift . f >=> yield
 
-tfold :: (Functor m, Monad m) => Fold i m a -> Transducer i o m a
+tfold :: (Functor m, Monad m) => Fold i m a -> Transducer e i o m a
 tfold (Fold.Fold s0 f outf) = loop s0
   where
     loop s = tryAwait >>= \case
         Nothing -> lift $ outf s
         Just x -> lift (f s x) >>= loop
 
-tscanl :: (Functor m, Monad m) => Fold i m a -> Transducer i a m ()
+tscanl :: (Functor m, Monad m) => Fold i m a -> Transducer e i a m ()
 tscanl (Fold.Fold s0 f outf) = loop s0
   where
     loop s = tryAwait >>= \case
@@ -172,13 +172,13 @@ tscanl (Fold.Fold s0 f outf) = loop s0
             loop s'
 
 -- yieldList doesn't actually need the Monad constraint, but it's necessary for the yieldListR rule to work.
-yieldList :: Monad m => [a] -> Transducer i a m ()
+yieldList :: Monad m => [a] -> Transducer e i a m ()
 yieldList = mapM_ yield
 {-# INLINE [0] yieldList #-}
 
 feed
     :: (Functor m, Monad m)
-    => i -> Transducer i o m a -> Transducer i o m a
+    => i -> Transducer e i o m a -> Transducer e i o m a
 feed i (Trs tr0) = Trs $ loop tr0
   where
     loop tr = case toView tr of
@@ -188,7 +188,7 @@ feed i (Trs tr0) = Trs $ loop tr0
 
 -- attempt to step the transducer by performing any monadic actions
 -- TODO: generalize this to dump any 'o's somewhere
-mstep :: (Functor m, Monad m) => Transducer i o m a -> m (Transducer i o m a)
+mstep :: (Functor m, Monad m) => Transducer e i o m a -> m (Transducer e i o m a)
 mstep (Trs tr0) = loop tr0
   where
     loop tr = case toView tr of
@@ -211,12 +211,12 @@ mstep (Trs tr0) = loop tr0
 --------------------------------------------------
 -- concat/flatten-type things
 
-treplicate :: Monad m => Int -> Transducer i i m ()
+treplicate :: Monad m => Int -> Transducer e i i m ()
 treplicate n = foreach $ replicateM_ n . yield
 
 unfold
     :: Monad m => (i -> s) -> (s -> Maybe (o,s))
-    -> Transducer i o m ()
+    -> Transducer e i o m ()
 unfold mkS unf = foreach $ loop SPEC . mkS
   where
     loop !sPEC s = case unf s of
@@ -226,7 +226,7 @@ unfold mkS unf = foreach $ loop SPEC . mkS
 -- | If (t i) is already existing, this isn't as optimal as it could be.
 -- Need to add some enumFromTo/replicate/etc. functions so
 -- everything fuses away.
-flatten :: (Foldable.Foldable t, Monad m) => Transducer (t i) i m ()
+flatten :: (Foldable.Foldable t, Monad m) => Transducer e (t i) i m ()
 flatten = foreach $ Foldable.mapM_ yield
 {-# INLINE [0] flatten #-}
 
@@ -240,15 +240,15 @@ flatten = foreach $ Foldable.mapM_ yield
 -- Fusion stuff
 
 
-replaceFold :: (Functor m, Monad m) => Fold i m a -> Transducer i () m a
+replaceFold :: (Functor m, Monad m) => Fold i m a -> Transducer e i () m a
 replaceFold f@(Fold.Fold s0 _ fOut) = foldOverR (fOut s0) (rfold f)
 {-# INLINE replaceFold #-}
 
 foldOverR
   :: (Functor m, Monad m)
   => m a
-  -> (forall t. (MonadTrans t, Monad (t m)) => RStream (t m) i -> RStream (t m) a)
-  -> Transducer i () m a
+  -> (forall t. (MonadTrans t, Monad (t m)) => RStream e (t m) i -> RStream e (t m) a)
+  -> Transducer e i () m a
 foldOverR a0 streamf = case streamf instream of
     RStream s0 step ->
         let loop !sPEC prev s = step s >>= \case
@@ -280,11 +280,11 @@ foldOverR a0 streamf = case streamf instream of
 --    Currently this only works well if users stick to provided functions
 --    or manually lower to streams.  Work on general fusion is ongoing..
 {-# RULES
-"overR/overR" forall (x :: forall t. (MonadTrans t, Monad (t m)) => RStream (t m) a -> RStream (t m) b) (y:: forall t. (MonadTrans t, Monad (t m)) => RStream (t m) b -> RStream (t m) c). (><>) (overR x) (overR y) = overR (y . x)
+"overR/overR" forall (x :: forall t. (MonadTrans t, Monad (t m)) => RStream e (t m) a -> RStream e (t m) b) (y:: forall t. (MonadTrans t, Monad (t m)) => RStream e (t m) b -> RStream e (t m) c). (><>) (overR x) (overR y) = overR (y . x)
 
-"overR/foldOverR" forall (x :: forall t. (MonadTrans t, Monad (t m)) => RStream (t m) a -> RStream (t m) b) y0 (y:: forall t. (MonadTrans t, Monad (t m)) => RStream (t m) b -> RStream (t m) c). overR x ><> foldOverR y0 y = foldOverR y0 (y . x)
+"overR/foldOverR" forall (x :: forall t. (MonadTrans t, Monad (t m)) => RStream e (t m) a -> RStream e (t m) b) y0 (y:: forall t. (MonadTrans t, Monad (t m)) => RStream e (t m) b -> RStream e (t m) c). overR x ><> foldOverR y0 y = foldOverR y0 (y . x)
 
-"runTrans/foldOverR" forall o0 (f :: forall t. (MonadTrans t, Monad (t m)) => RStream (t m) a -> RStream (t m) b). runTrans (foldOverR o0 f) = o0 >>= \o -> runStreamF o f
+"runTrans/foldOverR" forall o0 (f :: forall t. (MonadTrans t, Monad (t m)) => RStream e (t m) a -> RStream e (t m) b). runTrans (foldOverR o0 f) = o0 >>= \o -> runStreamF o f
     #-}
 
 -- so underR/overR means that Transducer is isomorphic to a stream transformer
@@ -292,7 +292,7 @@ foldOverR a0 streamf = case streamf instream of
 -- probably easier to think about (and probably better for certain
 -- recursive constructs)
 -- I don't have much use for 'underR' ATM.  Maybe I'll think of something...
-underR :: (Functor m, Monad m) => Transducer i o m a -> RStream m i -> RStream m o
+underR :: (Functor m, Monad m) => Transducer e i o m a -> RStream e m i -> RStream e m o
 underR m (RStream s0 stepInStream) = RStream (unTRS m,s0) getNext
   where
     getNext (toView -> Pure _,_) = return RFinal
@@ -308,8 +308,8 @@ underR m (RStream s0 stepInStream) = RStream (unTRS m,s0) getNext
 
 overR
     :: (Monad m)
-    => (forall t. (MonadTrans t, Monad (t m)) => RStream (t m) a -> RStream (t m) b)
-    -> Transducer a b m ()
+    => (forall t. (MonadTrans t, Monad (t m)) => RStream e (t m) a -> RStream e (t m) b)
+    -> Transducer e a b m ()
 overR streamf = case streamf instream of
     RStream s0 step ->
         let loop !sPEC s = step s >>= \case
@@ -325,13 +325,13 @@ overR streamf = case streamf instream of
 {-# NOINLINE [0] overR #-}
 
 {-# NOINLINE [0] runTrans #-}
-runTrans :: (Functor m, Monad m) => Transducer i o m a -> m (Maybe a)
+runTrans :: (Functor m, Monad m, Exception e) => Transducer e i o m a -> m a
 runTrans t0 = go SPEC $ unTRS t0
   where
     go !sPEC t = case toView t of
-      Pure a -> return $ Just a
+      Pure a -> return a
       Impure (Try f)   -> go SPEC $ f Nothing
-      Impure (Panic e _) -> throw e   -- TODO: do something about this throw
+      Impure (Panic e _) -> throw e
       Impure (TLift m)   -> m >>= go SPEC
       Impure (Yield _ m) -> go SPEC m
 
@@ -339,7 +339,7 @@ runTrans t0 = go SPEC $ unTRS t0
 -- Internal
 
 foreach
-  :: (Monad m) => (i -> Transducer i o m ()) -> Transducer i o m ()
+  :: (Monad m) => (i -> Transducer e i o m ()) -> Transducer e i o m ()
 foreach f = loop
   where
     loop = tryAwait >>= \case
