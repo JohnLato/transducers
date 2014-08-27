@@ -22,3 +22,10 @@ library
   build-depends:       base >=4.6 && <4.7, mtl >=2.1 && <2.2, transformers >=0.3 && <0.4, async
   hs-source-dirs:      src
   default-language:    Haskell2010
+
+test-suite unit-transducers
+  type:                exitcode-stdio-1.0
+  main-is:             transducers.hs
+  other-modules:       NoRewrite
+  hs-source-dirs:      tests
+  build-depends:       base, transformers, mtl, QuickCheck < 3, containers, transducers, test-framework-quickcheck2, test-framework, pretty
