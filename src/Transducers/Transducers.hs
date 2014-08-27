@@ -48,7 +48,7 @@ import Transducers.Stream
 
 import Control.Applicative
 import Control.Exception
-import Control.Monad ((>=>), forever, liftM, when, replicateM_)
+import Control.Monad ((>=>), liftM, when, replicateM_)
 import Control.Monad.IO.Class
 import Control.Monad.Trans
 import qualified Data.Foldable as Foldable
@@ -58,8 +58,7 @@ import qualified Data.Foldable as Foldable
 
 -- Functor to represent the main Transducer type
 data TransducerF i o m a =
-    Await (i -> a)
-  | Try (Maybe i -> a)
+    Try (Maybe i -> a)
   | Yield o a
   | Panic SomeException a
   | TLift (m a)  -- is this ok?  Maybe it should be moved to FreeMonad?
@@ -88,7 +87,7 @@ yield :: o -> Transducer i o m ()
 yield x = Trs . fromView $ Impure $ Yield x (return ())
 
 await :: Transducer i o m i
-await = Trs . fromView $ Impure (Await return)
+await = Trs . fromView . Impure . Try $ maybe (unTRS await) return
 
 tryAwait :: Transducer i o m (Maybe i)
 tryAwait = Trs . fromView $ Impure (Try return)
@@ -116,9 +115,7 @@ l0' ><> r0' = Trs $ go (unTRS l0') (unTRS r0')
         (Impure (TLift m) , _)       -> fromView $ Impure (TLift $ (`go` r0) <$> m)
         (_ , Impure (TLift m))       -> fromView $ Impure (TLift $ (l0 `go`) <$> m)
         (_ , Impure (Yield o nextR)) -> unTRS (yield o) >> (l0 `go` nextR)
-        (Impure (Await f) , _)       -> fromView $ Impure (Await $ (`go` r0) <$> f)
         (Impure (Try f)   , _)       -> fromView $ Impure (Try $ (`go` r0) <$> f)
-        (Impure (Yield o nextL) , Impure (Await f)) -> nextL `go` f o
         (Impure (Yield o nextL) , Impure (Try f))   -> nextL `go` f (Just o)
 {-# NOINLINE [0] (><>) #-}
 
@@ -129,7 +126,6 @@ dropInputs
     -> FreeMonad (TransducerF x o m) a
 dropInputs t = case toView t of
     Pure a -> return a
-    Impure (Await _) -> forever $ unTRS await
     Impure (Try f)   -> dropInputs $ f Nothing
     Impure (Yield o a) -> fromView $ Impure (Yield o (dropInputs a))
     Impure (Panic e a) -> fromView $ Impure (Panic e (dropInputs a))
@@ -142,7 +138,6 @@ dropOutputs
 dropOutputs t = case toView t of
     Pure a -> return a
     Impure (Yield _ a) -> dropOutputs a
-    Impure (Await f)   -> fromView $ Impure (Await $ dropOutputs <$> f)
     Impure (Try f)     -> fromView $ Impure (Try $ dropOutputs <$> f)
     Impure (Panic e a) -> fromView $ Impure (Panic e $ dropOutputs a)
     Impure (TLift m)   -> fromView $ Impure (TLift $ dropOutputs <$> m)
@@ -151,13 +146,13 @@ dropOutputs t = case toView t of
 -- higher-level API
 
 tmap :: (Functor m,Monad m) => (i -> o) -> Transducer i o m ()
-tmap f = forever $ await >>= yield . f
+tmap f = foreach $ yield . f
 
 tfilter :: (Functor m, Monad m) => (i -> Bool) -> Transducer i i m ()
-tfilter p = forever $ await >>= \x -> when (p x) (yield x)
+tfilter p = foreach $ \x -> when (p x) (yield x)
 
 mapM :: Monad m => (i -> m o) -> Transducer i o m ()
-mapM f = forever $ await >>= (lift . f >=> yield)
+mapM f = foreach $ lift . f >=> yield
 
 tfold :: (Functor m, Monad m) => Fold i m a -> Transducer i o m a
 tfold (Fold.Fold s0 f outf) = loop s0
@@ -169,11 +164,12 @@ tfold (Fold.Fold s0 f outf) = loop s0
 tscanl :: (Functor m, Monad m) => Fold i m a -> Transducer i a m ()
 tscanl (Fold.Fold s0 f outf) = loop s0
   where
-    loop s = do
-        i <- await
-        !s' <- lift $ f s i
-        yield =<< lift (outf s')
-        loop s'
+    loop s = tryAwait >>= \case
+        Nothing -> return ()
+        Just i -> do
+            !s' <- lift $ f s i
+            yield =<< lift (outf s')
+            loop s'
 
 -- yieldList doesn't actually need the Monad constraint, but it's necessary for the yieldListR rule to work.
 yieldList :: Monad m => [a] -> Transducer i a m ()
@@ -186,7 +182,6 @@ feed
 feed i (Trs tr0) = Trs $ loop tr0
   where
     loop tr = case toView tr of
-        Impure (Await f) -> f i
         Impure (Try f)   -> f (Just i)
         Impure f -> fromView $ Impure (loop <$> f)
         Pure _ -> tr
@@ -217,12 +212,16 @@ mstep (Trs tr0) = loop tr0
 -- concat/flatten-type things
 
 treplicate :: Monad m => Int -> Transducer i i m ()
-treplicate n = await >>= replicateM_ n . yield
+treplicate n = tryAwait >>= \case
+    Nothing -> return ()
+    Just x -> replicateM_ n $ yield x
 
 unfold
     :: Monad m => (i -> s) -> (s -> Maybe (o,s))
     -> Transducer i o m ()
-unfold mkS unf = await >>= loop SPEC . mkS
+unfold mkS unf = tryAwait >>= \case
+    Nothing -> return ()
+    Just x -> loop SPEC $ mkS x
   where
     loop !sPEC s = case unf s of
         Just (o,s') -> yield o >> loop SPEC s'
@@ -232,7 +231,9 @@ unfold mkS unf = await >>= loop SPEC . mkS
 -- Need to add some enumFromTo/replicate/etc. functions so
 -- everything fuses away.
 flatten :: (Foldable.Foldable t, Monad m) => Transducer (t i) i m ()
-flatten = await >>= Foldable.mapM_ yield 
+flatten = tryAwait >>= \case
+    Nothing -> return ()
+    Just x -> Foldable.mapM_ yield x
 {-# INLINE [0] flatten #-}
 
 {-# RULES
@@ -301,11 +302,6 @@ underR :: (Functor m, Monad m) => Transducer i o m a -> RStream m i -> RStream m
 underR m (RStream s0 stepInStream) = RStream (unTRS m,s0) getNext
   where
     getNext (toView -> Pure _,_) = return RFinal
-    getNext (aw@(toView -> (Impure (Await f))),s) = stepInStream s >>= \case
-        RStep i s' -> getNext (f i,s')
-        RSkip s' -> getNext (aw,s')
-        Die e s' -> getNext (unTRS (panic e) >> aw,s')
-        RFinal   -> return RFinal
     getNext (aw@(toView -> (Impure (Try f))),s) = stepInStream s >>= \case
         RStep i s' -> getNext (f $ Just i, s')
         RSkip s'   -> getNext (aw, s')
@@ -340,8 +336,19 @@ runTrans t0 = go SPEC $ unTRS t0
   where
     go !sPEC t = case toView t of
       Pure a -> return $ Just a
-      Impure (Await _) -> return Nothing
       Impure (Try f)   -> go SPEC $ f Nothing
       Impure (Panic e _) -> throw e   -- TODO: do something about this throw
       Impure (TLift m)   -> m >>= go SPEC
       Impure (Yield _ m) -> go SPEC m
+
+--------------------------------------------------
+-- Internal
+
+foreach
+  :: (Monad m) => (i -> Transducer i o m ()) -> Transducer i o m ()
+foreach f = loop
+  where
+    loop = tryAwait >>= \case
+        Nothing -> return ()
+        Just x -> f x >> loop
+{-# INLINE foreach #-}
