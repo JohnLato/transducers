@@ -184,7 +184,8 @@ rfold (Fold.Fold s0 ff fout) (RStream r0 rstep) = RStream (s0,r0) go
     go (fstate,rstate) = rstep rstate >>= \case
         RStep a s' -> do
             fstate' <- lift $ ff fstate a
-            return $ RStep (fout fstate') (fstate',s')
+            out <- lift $ fout fstate'
+            return $ RStep out (fstate',s')
         RSkip s' -> return $ RSkip (fstate,s')
         Die e s' -> return $ Die e (fstate,s')
         RFinal   -> return RFinal

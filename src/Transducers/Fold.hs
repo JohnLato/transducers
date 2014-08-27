@@ -11,7 +11,10 @@ module Transducers.Fold (
 
 import Prelude hiding (mapM_)
 
-data Fold i m a = forall s. Fold s (s -> i -> m s) (s -> a)
+data Fold i m a = forall s. Fold s (s -> i -> m s) (s -> m a)
+
+instance Functor m => Functor (Fold i m) where
+    fmap f (Fold s0 step mkOut) = Fold s0 step (fmap f . mkOut)
 
 class Folding f where
     type Input f
@@ -28,9 +31,9 @@ foldM
     => (a -> i -> m a)
     -> a
     -> f a
-foldM f s0 = liftFold $ Fold s0 f id
+foldM f s0 = liftFold $ Fold s0 f return
 
 mapM_
-    :: (Folding f, Input f ~ i, FMonad f ~ m)
+    :: (Folding f, Input f ~ i, FMonad f ~ m, Monad m)
     => (i -> m ()) -> f ()
-mapM_ f = liftFold $ Fold () (\() i -> f i) id
+mapM_ f = liftFold $ Fold () (\() i -> f i) return

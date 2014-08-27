@@ -1,9 +1,9 @@
 {-# LANGUAGE TupleSections #-}
 
-{-# OPTIONS -ddump-to-file -ddump-simpl-iterations -ddump-rule-firings -ddump-simpl #-}
 {-# OPTIONS -Wall -fno-warn-unused-matches #-}
 module Transducers (
   module M,
+  module Fold,
   main,
 ) where
 

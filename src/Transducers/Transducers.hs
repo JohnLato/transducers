@@ -25,13 +25,19 @@ module Transducers.Transducers (
   tfilter,
   mapM,
   tfold,
+  tscanl,
   flatten,
   treplicate,
   unfold,
 
   yieldList,
+  feed,
+  mstep,
   runTrans,
 
+  -- ** fusion stuff
+  foldOverR,
+  underR,
 ) where
 
 import Prelude hiding (mapM)
@@ -43,6 +49,7 @@ import Transducers.Stream
 import Control.Applicative
 import Control.Exception
 import Control.Monad ((>=>), forever, liftM, when, replicateM_)
+import Control.Monad.IO.Class
 import Control.Monad.Trans
 import qualified Data.Foldable as Foldable
 
@@ -64,6 +71,9 @@ newtype Transducer i o m a =
 
 instance MonadTrans (Transducer i o) where
     lift m = Trs $ fromView (Impure (TLift $ liftM return m))
+
+instance MonadIO m => MonadIO (Transducer i o m) where
+    liftIO = lift . liftIO
 
 instance (Functor m, Monad m) => Fold.Folding (Transducer i o m) where
     type Input (Transducer i o m) = i
@@ -153,7 +163,7 @@ tfold :: (Functor m, Monad m) => Fold i m a -> Transducer i o m a
 tfold (Fold.Fold s0 f outf) = loop s0
   where
     loop s = tryAwait >>= \case
-        Nothing -> return $ outf s
+        Nothing -> lift $ outf s
         Just x -> lift (f s x) >>= loop
 
 tscanl :: (Functor m, Monad m) => Fold i m a -> Transducer i a m ()
@@ -162,13 +172,33 @@ tscanl (Fold.Fold s0 f outf) = loop s0
     loop s = do
         i <- await
         !s' <- lift $ f s i
-        yield $ outf s'
+        yield =<< lift (outf s')
         loop s'
 
 -- yieldList doesn't actually need the Monad constraint, but it's necessary for the yieldListR rule to work.
 yieldList :: Monad m => [a] -> Transducer i a m ()
 yieldList = mapM_ yield
 {-# INLINE [0] yieldList #-}
+
+feed
+    :: (Functor m, Monad m)
+    => i -> Transducer i o m a -> Transducer i o m a
+feed i (Trs tr0) = Trs $ loop tr0
+  where
+    loop tr = case toView tr of
+        Impure (Await f) -> f i
+        Impure (Try f)   -> f (Just i)
+        Impure f -> fromView $ Impure (loop <$> f)
+        Pure _ -> tr
+
+-- attempt to step the transducer by performing any monadic actions
+-- TODO: generalize this to dump any 'o's somewhere
+mstep :: (Functor m, Monad m) => Transducer i o m a -> m (Transducer i o m a)
+mstep (Trs tr0) = loop tr0
+  where
+    loop tr = case toView tr of
+        Impure (TLift m) -> m >>= loop
+        _                -> return (Trs tr)
 
 -- TODO: all these should only happen in the first phases, by
 -- the last phase we want to undo them...
@@ -181,6 +211,7 @@ yieldList = mapM_ yield
   -- I think I can do this more directly, maybe.
 "lower/tscanl" forall f. tscanl f = overR (rfold f)
     #-}
+-- TODO: fuse feed
 
 --------------------------------------------------
 -- concat/flatten-type things
@@ -220,7 +251,7 @@ replaceFold f@(Fold.Fold s0 _ fOut) = foldOverR (fOut s0) (rfold f)
 
 foldOverR
   :: (Functor m, Monad m)
-  => a
+  => m a
   -> (forall t. (MonadTrans t, Monad (t m)) => RStream (t m) i -> RStream (t m) a)
   -> Transducer i () m a
 foldOverR a0 streamf = case streamf instream of
@@ -230,7 +261,7 @@ foldOverR a0 streamf = case streamf instream of
                 RSkip s'   -> loop SPEC prev s'
                 Die e s'   -> panic e >> loop SPEC prev s'
                 RFinal     -> return prev
-        in loop SPEC a0 s0
+        in lift a0 >>= \a0' -> loop SPEC a0' s0
   where
     instream = RStream () instep
     instep () = do
@@ -258,7 +289,7 @@ foldOverR a0 streamf = case streamf instream of
 
 "overR/foldOverR" forall (x :: forall t. (MonadTrans t, Monad (t m)) => RStream (t m) a -> RStream (t m) b) y0 (y:: forall t. (MonadTrans t, Monad (t m)) => RStream (t m) b -> RStream (t m) c). overR x ><> foldOverR y0 y = foldOverR y0 (y . x)
 
-"runTrans/foldOverR" forall o0 (f :: forall t. (MonadTrans t, Monad (t m)) => RStream (t m) a -> RStream (t m) b). runTrans (foldOverR o0 f) = runStreamF o0 f
+"runTrans/foldOverR" forall o0 (f :: forall t. (MonadTrans t, Monad (t m)) => RStream (t m) a -> RStream (t m) b). runTrans (foldOverR o0 f) = o0 >>= \o -> runStreamF o f
     #-}
 
 -- so underR/overR means that Transducer is isomorphic to a stream transformer
@@ -311,6 +342,6 @@ runTrans t0 = go SPEC $ unTRS t0
       Pure a -> return $ Just a
       Impure (Await _) -> return Nothing
       Impure (Try f)   -> go SPEC $ f Nothing
-      Impure (Panic e _) -> throw e
+      Impure (Panic e _) -> throw e   -- TODO: do something about this throw
       Impure (TLift m)   -> m >>= go SPEC
       Impure (Yield _ m) -> go SPEC m
