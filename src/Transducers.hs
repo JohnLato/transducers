@@ -3,12 +3,11 @@
 {-# OPTIONS -Wall -fno-warn-unused-matches #-}
 module Transducers (
   module M,
-  module Fold,
   main,
 ) where
 
 import Prelude hiding (mapM)
-import qualified Transducers.Fold as Fold
+import Transducers.Fold as Fold
 import Transducers.Transducers as M
 
 import Control.Applicative
