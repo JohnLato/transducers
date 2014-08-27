@@ -66,7 +66,7 @@ data TransducerF i o m a =
 
 newtype Transducer i o m a =
     Trs { unTRS :: FreeMonad (TransducerF i o m) a}
-    deriving (Functor, Monad)
+    deriving (Functor, Applicative, Monad)
 
 instance MonadTrans (Transducer i o) where
     lift m = Trs $ fromView (Impure (TLift $ liftM return m))

@@ -5,7 +5,8 @@ module Transducers.FreeMonad(FreeMonadView(..),FreeMonad, fromView,toView) where
 import Data.Interface.TSequence
 import Data.FastQueue
 
-import Control.Monad (liftM)
+import Control.Monad (liftM,ap)
+import Control.Applicative
 
 newtype FC f a b = FC (a -> FreeMonad f b)
 type FMExp f a b = FastQueue (FC f) a b
@@ -32,3 +33,7 @@ instance Monad (FreeMonad f) where
 
 instance Functor (FreeMonad r) where
   fmap f = liftM f
+
+instance Applicative (FreeMonad f) where
+  pure = fromView . Pure
+  (<*>) = ap

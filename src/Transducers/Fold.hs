@@ -18,7 +18,7 @@ instance Functor m => Functor (Fold i m) where
 
 class Folding f where
     type Input f
-    type FMonad f
+    type FMonad f :: * -> *
     liftFold :: (Input f ~ i, FMonad f ~ m) => Fold i m a -> f a
 
 instance Folding (Fold i m) where
