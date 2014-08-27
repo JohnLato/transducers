@@ -212,16 +212,12 @@ mstep (Trs tr0) = loop tr0
 -- concat/flatten-type things
 
 treplicate :: Monad m => Int -> Transducer i i m ()
-treplicate n = tryAwait >>= \case
-    Nothing -> return ()
-    Just x -> replicateM_ n $ yield x
+treplicate n = foreach $ replicateM_ n . yield
 
 unfold
     :: Monad m => (i -> s) -> (s -> Maybe (o,s))
     -> Transducer i o m ()
-unfold mkS unf = tryAwait >>= \case
-    Nothing -> return ()
-    Just x -> loop SPEC $ mkS x
+unfold mkS unf = foreach $ loop SPEC . mkS
   where
     loop !sPEC s = case unf s of
         Just (o,s') -> yield o >> loop SPEC s'
@@ -231,9 +227,7 @@ unfold mkS unf = tryAwait >>= \case
 -- Need to add some enumFromTo/replicate/etc. functions so
 -- everything fuses away.
 flatten :: (Foldable.Foldable t, Monad m) => Transducer (t i) i m ()
-flatten = tryAwait >>= \case
-    Nothing -> return ()
-    Just x -> Foldable.mapM_ yield x
+flatten = foreach $ Foldable.mapM_ yield
 {-# INLINE [0] flatten #-}
 
 {-# RULES
