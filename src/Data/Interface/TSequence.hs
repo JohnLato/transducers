@@ -44,9 +44,3 @@ data TViewL s c x y where
 data TViewR s c x y where
    TEmptyR  :: TViewR s c x x
    (:|<)     :: s c x y -> c y z -> TViewR s c x z
-
-
-
-instance TSequence s => Category (s c) where
-  id = tempty
-  (.) = flip (><) -- not (><): type error
