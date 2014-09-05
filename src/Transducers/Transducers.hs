@@ -108,16 +108,16 @@ r <>< l = l ><> r
 (><>) :: (Functor m) => Transducer e a b m x -> Transducer e b c m y -> Transducer e a c m y
 l0' ><> r0' = Trs $ go (unTRS l0') (unTRS r0')
   where
-    go l0 r0 = case (toView l0, toView r0) of
-        (Pure _ , _)                 -> dropInputs r0
-        (_ , Pure a)                 -> dropOutputs l0 >> return a
-        (Impure (Panic e a) , _)     -> fromView $ Impure (Panic e (a `go` r0))
-        (_ , Impure (Panic e r))     -> fromView $ Impure (Panic e (l0 `go` r))
-        (Impure (TLift m) , _)       -> fromView $ Impure (TLift $ (`go` r0) <$> m)
-        (_ , Impure (TLift m))       -> fromView $ Impure (TLift $ (l0 `go`) <$> m)
-        (_ , Impure (Yield o nextR)) -> unTRS (yield o) >> (l0 `go` nextR)
-        (Impure (Try f)   , _)       -> fromView $ Impure (Try $ (`go` r0) <$> f)
-        (Impure (Yield o nextL) , Impure (Try f))   -> nextL `go` f (Just o)
+     go l0 r0 = case (toView l0, toView r0) of
+         (_ , Pure a)                 -> return a
+         (_ , Impure (Yield o nextR)) -> unTRS (yield o) >> (l0 `go` nextR)
+         (_ , Impure (Panic e r))     -> fromView $ Impure (Panic e (l0 `go` r))
+         (_ , Impure (TLift m))       -> fromView $ Impure (TLift $ (l0 `go`) <$> m)
+         (Impure (Panic e a) , _)     -> fromView $ Impure (Panic e (a `go` r0))
+         (Impure (TLift m) , _)       -> fromView $ Impure (TLift $ (`go` r0) <$> m)
+         (Impure (Try f)   , _)       -> fromView $ Impure (Try $ (`go` r0) <$> f)
+         (Impure (Yield o nextL) , Impure (Try f))   -> nextL `go` f (Just o)
+         (Pure _                 , Impure (Try f))   -> l0 `go` f Nothing
 {-# NOINLINE [0] (><>) #-}
 
 
