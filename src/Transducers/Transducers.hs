@@ -61,8 +61,8 @@ import qualified Data.Foldable as Foldable
 data TransducerF e i o m a =
     Try (Maybe i -> a)
   | Yield o a
-  | Panic e a
   | TLift (m a)  -- is this ok?  Maybe it should be moved to FreeMonad?
+  | Panic e a
   deriving Functor
 
 newtype Transducer e i o m a =
@@ -146,14 +146,20 @@ dropOutputs t = case toView t of
 --------------------------------------------------
 -- higher-level API
 
+idT :: Transducer e i i m ()
+idT = forever $ await >>= yield
+
 tmap :: (Functor m,Monad m) => (i -> o) -> Transducer e i o m ()
 tmap f = foreach $ yield . f
+{-# NOINLINE [0] tmap #-}
 
 tfilter :: (Functor m, Monad m) => (i -> Bool) -> Transducer e i i m ()
 tfilter p = foreach $ \x -> when (p x) (yield x)
+{-# NOINLINE [0] tfilter #-}
 
 mapM :: Monad m => (i -> m o) -> Transducer e i o m ()
 mapM f = foreach $ lift . f >=> yield
+{-# NOINLINE [0] mapM #-}
 
 tfold :: (Functor m, Monad m) => Fold i m a -> Transducer e i o m a
 tfold (Fold.Fold s0 f outf) = loop s0
@@ -161,6 +167,7 @@ tfold (Fold.Fold s0 f outf) = loop s0
     loop s = tryAwait >>= \case
         Nothing -> lift $ outf s
         Just x -> lift (f s x) >>= loop
+{-# INLINE [1] tfold #-}
 
 tscanl :: (Functor m, Monad m) => Fold i m a -> Transducer e i a m ()
 tscanl (Fold.Fold s0 f outf) = loop s0
@@ -187,8 +194,8 @@ mealyM s0 f = loop s0
 {-# NOINLINE [0] mealyM #-}
 
 -- yieldList doesn't actually need the Monad constraint, but it's necessary for the yieldListR rule to work.
-yieldList :: Monad m => [a] -> Transducer e i a m ()
-yieldList = mapM_ yield
+yieldList :: Monad m => [i] -> Transducer e i i m ()
+yieldList xs = mapM_ yield xs >> idT
 {-# INLINE [0] yieldList #-}
 
 feed
@@ -213,13 +220,14 @@ mstep (Trs tr0) = loop tr0
 -- TODO: all these should only happen in the first phases, by
 -- the last phase we want to undo them...
 {-# RULES
-"lower/tmap" forall f. tmap f = overR (rmap f)
-"lower/tfilter" forall p. tfilter p = overR (rfilter p)
-"lower/mapM" forall f. mapM f = overR (rmapM (lift . f))
-"lower/yieldList" forall xs. yieldList xs = overR (ryieldList xs)
-"lower/tfold" forall f. tfold f = replaceFold f
+"<trx> lower/tmap" forall f. tmap f = overR (rmap f)
+"<trx> lower/tfilter" forall p. tfilter p = overR (rfilter p)
+"<trx> lower/mapM"    forall f. mapM f = overR (rmapM (lift . f))
+"<trx> lower/mealyM"  forall s f. mealyM s f = overR (rmealyM s (\s i -> lift (f s i)))
+"<trx> lower/yieldList" forall xs. yieldList xs = overR (ryieldList xs)
+"<trx> lower/tfold" forall f. tfold f = replaceFold f
   -- I think I can do this more directly, maybe.
-"lower/tscanl" forall f. tscanl f = overR (rfold f)
+"<trx> lower/tscanl" forall f. tscanl f = overR (rfold f)
     #-}
 -- TODO: fuse feed
 
@@ -246,9 +254,10 @@ flatten = foreach $ Foldable.mapM_ yield
 {-# INLINE [0] flatten #-}
 
 {-# RULES
-"flatten/list" flatten = overR rflattenList
-"treplicate" forall n. treplicate n = overR (rreplicate n)
-"unfold" forall mkS unf. unfold mkS unf = overR (runfold mkS unf)
+"<trx> flatten/list"  flatten = overR rflattenList
+"<trx> flatten/maybe" flatten = overR rflattenMaybe
+"<trx> treplicate" forall n. treplicate n = overR (rreplicate n)
+"<trx> unfold" forall mkS unf. unfold mkS unf = overR (runfold mkS unf)
     #-}
 
 --------------------------------------------------
@@ -295,11 +304,11 @@ foldOverR a0 streamf = case streamf instream of
 --    Currently this only works well if users stick to provided functions
 --    or manually lower to streams.  Work on general fusion is ongoing..
 {-# RULES
-"overR/overR" forall (x :: forall t. (MonadTrans t, Monad (t m)) => RStream e (t m) a -> RStream e (t m) b) (y:: forall t. (MonadTrans t, Monad (t m)) => RStream e (t m) b -> RStream e (t m) c). (><>) (overR x) (overR y) = overR (y . x)
+"<trx> overR/overR" forall (x :: forall t. (MonadTrans t, Monad (t m)) => RStream e (t m) a -> RStream e (t m) b) (y:: forall t. (MonadTrans t, Monad (t m)) => RStream e (t m) b -> RStream e (t m) c). (><>) (overR x) (overR y) = overR (y . x)
 
-"overR/foldOverR" forall (x :: forall t. (MonadTrans t, Monad (t m)) => RStream e (t m) a -> RStream e (t m) b) y0 (y:: forall t. (MonadTrans t, Monad (t m)) => RStream e (t m) b -> RStream e (t m) c). overR x ><> foldOverR y0 y = foldOverR y0 (y . x)
+"<trx> overR/foldOverR" forall (x :: forall t. (MonadTrans t, Monad (t m)) => RStream e (t m) a -> RStream e (t m) b) y0 (y:: forall t. (MonadTrans t, Monad (t m)) => RStream e (t m) b -> RStream e (t m) c). overR x ><> foldOverR y0 y = foldOverR y0 (y . x)
 
-"runTrans/foldOverR" forall o0 (f :: forall t. (MonadTrans t, Monad (t m)) => RStream e (t m) a -> RStream e (t m) b). runTrans (foldOverR o0 f) = o0 >>= \o -> runStreamF o f
+"<trx> runTrans/foldOverR" forall o0 (f :: forall t. (MonadTrans t, Monad (t m)) => RStream e (t m) a -> RStream e (t m) b). runTrans (foldOverR o0 f) = o0 >>= \o -> runStreamF o f
     #-}
 
 -- so underR/overR means that Transducer is isomorphic to a stream transformer
