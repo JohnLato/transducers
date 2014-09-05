@@ -13,8 +13,10 @@ type FMExp f a b = FastQueue (FC f) a b
 
 data FreeMonad f a = 
    forall x. FM (FreeMonadView f x) (FMExp f x a)
-data FreeMonadView f a  = Pure a 
-                        | Impure (f (FreeMonad f a))
+data FreeMonadView f a  =
+       Impure (f (FreeMonad f a))
+     | Pure a
+
 fromView x = FM x tempty
 
 toView :: Functor f => FreeMonad f a -> FreeMonadView f a
