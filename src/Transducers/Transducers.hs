@@ -324,6 +324,7 @@ overR streamf = case streamf instream of
         maybe RFinal (flip RStep ()) <$> tryAwait
 {-# NOINLINE [0] overR #-}
 
+-- run a transducer, ignoring all output values
 {-# NOINLINE [0] runTrans #-}
 runTrans :: (Functor m, Monad m, Exception e) => Transducer e i o m a -> m a
 runTrans t0 = go SPEC $ unTRS t0

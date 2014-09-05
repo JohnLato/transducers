@@ -52,7 +52,7 @@ data SPEC = SPEC | SPEC2
 data RStream e m a =
     forall s. RStream s (s -> m (RStep e s a))
 
-data RStep e s a = 
+data RStep e s a =
     RStep a s
   | RSkip s
   | Die e s

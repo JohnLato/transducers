@@ -26,7 +26,7 @@ testIt =
           -- remove it.  Yes we can!
 {-# INLINE testIt #-}
 
-runTest :: (MonadIO m, Functor m) => Transducer SomeException () () m ()
+runTest :: (MonadIO m, Functor m) => Transducer SomeException Int () m ()
 runTest = yieldList [1,2,3] ><> testIt ><> Fold.mapM_ (liftIO . print)
 {-# INLINE runTest #-}
 
