@@ -17,6 +17,7 @@ module Transducers.Stream (
   rmap,
   rfilter,
   rmapM,
+  rmealyM,
   emptyStream,
   ryieldList,
   rfold,
@@ -24,6 +25,7 @@ module Transducers.Stream (
 
   rflatten,
   rflattenList,
+  rflattenMaybe,
   rreplicate,
   runfold,
 ) where
@@ -106,6 +108,19 @@ rmapM f (RStream s0 step) = RStream s0 go
           Die err s' -> return $ Die err s'
           RFinal     -> return RFinal
 
+{-# INLINE [0] rmealyM #-}
+rmealyM :: Monad m => s -> (s -> i -> m (o,s)) -> RStream e m i -> RStream e m o
+rmealyM s0 f (RStream rs0 step) = RStream (s0,rs0) go
+  where
+    {-# INLINE [0] go #-}
+    go (s,rs) = do
+        st <- step rs
+        case st of
+            RStep i rs' -> f s i >>= \(o,s') -> return $ RStep o (s',rs')
+            RSkip rs'   -> return $ RSkip (s,rs')
+            Die err rs' -> return $ Die err (s,rs')
+            RFinal      -> return RFinal
+
 --------------------------------------------------
 -- flatteners
 
@@ -131,6 +146,14 @@ rflattenList = rflatten id uncons
   where
     uncons [] = RFinal
     uncons (x:xs) = RStep x xs
+
+{-# INLINE rflattenMaybe #-}
+rflattenMaybe :: Monad m => RStream e m (Maybe a) -> RStream e m a
+rflattenMaybe = rflatten id uncons
+  where
+    uncons (Just x) = RStep x Nothing
+    uncons Nothing = RFinal
+
 
 -- use this instead of 'Either a (a,b)' to avoid the extra
 -- boxing of the tuple

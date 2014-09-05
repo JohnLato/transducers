@@ -24,6 +24,7 @@ module Transducers.Transducers (
   tmap,
   tfilter,
   mapM,
+  mealyM,
   tfold,
   tscanl,
   flatten,
@@ -48,7 +49,7 @@ import Transducers.Stream
 
 import Control.Applicative
 import Control.Exception
-import Control.Monad ((>=>), liftM, when, replicateM_)
+import Control.Monad ((>=>), liftM, when, replicateM_, forever)
 import Control.Monad.IO.Class
 import Control.Monad.Trans
 import qualified Data.Foldable as Foldable
@@ -170,6 +171,20 @@ tscanl (Fold.Fold s0 f outf) = loop s0
             !s' <- lift $ f s i
             yield =<< lift (outf s')
             loop s'
+{-# NOINLINE [0] tscanl #-}
+
+-- TODO: this should return the final state, but then I can't make fusion work
+-- until I add a return val to RStream
+mealyM :: (Functor m, Monad m) => s -> (s -> i -> m (o,s)) -> Transducer e i o m ()
+mealyM s0 f = loop s0
+  where
+    loop s = tryAwait >>= \case
+        Nothing -> return ()
+        Just i -> do
+            (o,s') <- lift $ f s i
+            yield o
+            loop s'
+{-# NOINLINE [0] mealyM #-}
 
 -- yieldList doesn't actually need the Monad constraint, but it's necessary for the yieldListR rule to work.
 yieldList :: Monad m => [a] -> Transducer e i a m ()
