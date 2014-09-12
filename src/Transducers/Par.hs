@@ -36,6 +36,7 @@ parT (Trs tr0) = careful tr0
             return . fromView . Impure . TLift $ wait res
         Impure (Panic e m) -> panic e >> careful m
         Impure (Yield o m) -> yield o >> careful m
+{-# NOINLINE [0] parT #-}
 
 {-# RULES
 "parT/parF" forall f. parT (tfold f) = tfold (parF f)

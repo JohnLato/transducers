@@ -14,6 +14,7 @@ import Prelude hiding (mapM_)
 data Fold i m a = forall s. Fold s (s -> i -> m s) (s -> m a)
 
 instance Functor m => Functor (Fold i m) where
+    {-# INLINE fmap #-}
     fmap f (Fold s0 step mkOut) = Fold s0 step (fmap f . mkOut)
 
 class Folding f where

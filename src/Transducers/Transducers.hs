@@ -67,7 +67,19 @@ data TransducerF e i o m a =
 
 newtype Transducer e i o m a =
     Trs { unTRS :: FreeMonad (TransducerF e i o m) a}
-    deriving (Functor, Applicative, Monad)
+    deriving (Applicative, Monad)
+
+instance Functor (Transducer e i o m) where
+    {-# INLINE fmap #-}
+    fmap f = t_fmap f
+    {-# INLINE (<$) #-}
+    a <$ t = t_fmap (const a) t
+    -- TODO: might be good to have a special function for this case
+    -- on Transducers (still should try to rewrite over Fold though)
+
+t_fmap :: (a -> b) -> Transducer e i o m a -> Transducer e i o m b
+t_fmap f = Trs . fmap f . unTRS
+{-# INLINE [1] t_fmap #-}
 
 instance MonadTrans (Transducer e i o) where
     lift m = Trs $ fromView (Impure (TLift $ liftM return m))
@@ -96,6 +108,8 @@ tryAwait = Trs . fromView $ Impure (Try return)
 panic :: e -> Transducer e i o m ()
 panic e = Trs . fromView . Impure $ Panic e (return ())
 
+idT :: Monad m => Transducer e a a m ()
+idT = foreach yield
 --------------------------------------------------
 -- composition
 
@@ -146,9 +160,6 @@ dropOutputs t = case toView t of
 --------------------------------------------------
 -- higher-level API
 
-idT :: Transducer e i i m ()
-idT = forever $ await >>= yield
-
 tmap :: (Functor m,Monad m) => (i -> o) -> Transducer e i o m ()
 tmap f = foreach $ yield . f
 {-# NOINLINE [0] tmap #-}
@@ -168,6 +179,10 @@ tfold (Fold.Fold s0 f outf) = loop s0
         Nothing -> lift $ outf s
         Just x -> lift (f s x) >>= loop
 {-# INLINE [1] tfold #-}
+
+{-# RULES
+"<trx> fmap/tfold" forall f g. t_fmap f (tfold g) = tfold (fmap f g)
+    #-}
 
 tscanl :: (Functor m, Monad m) => Fold i m a -> Transducer e i a m ()
 tscanl (Fold.Fold s0 f outf) = loop s0
@@ -228,6 +243,13 @@ mstep (Trs tr0) = loop tr0
 "<trx> lower/tfold" forall f. tfold f = replaceFold f
   -- I think I can do this more directly, maybe.
 "<trx> lower/tscanl" forall f. tscanl f = overR (rfold f)
+
+-- these all require a Functor constraint, which overly-complicates things...
+-- "<trx> lift/tmap"    [0] forall f. overR (rmap f) = tmap f
+-- "<trx> lift/tfilter" [0] forall p. overR (rfilter p) = tfilter p
+-- "<trx> lift/mapM"    [0] forall f. overR (rmapM (lift . f)) = mapM f
+-- "<trx> lift/tfold"   [0] forall f. replaceFold f = tfold f
+-- "<trx> lift/tscanl"  [0] forall f. overR (rfold f) = tscanl f
     #-}
 -- TODO: fuse feed
 
@@ -236,6 +258,7 @@ mstep (Trs tr0) = loop tr0
 
 treplicate :: Monad m => Int -> Transducer e i i m ()
 treplicate n = foreach $ replicateM_ n . yield
+{-# NOINLINE [0] treplicate #-}
 
 unfold
     :: Monad m => (i -> s) -> (s -> Maybe (o,s))
@@ -245,6 +268,7 @@ unfold mkS unf = foreach $ loop SPEC . mkS
     loop !sPEC s = case unf s of
         Just (o,s') -> yield o >> loop SPEC s'
         Nothing -> return ()
+{-# NOINLINE [0] unfold #-}
 
 -- | If (t i) is already existing, this isn't as optimal as it could be.
 -- Need to add some enumFromTo/replicate/etc. functions so

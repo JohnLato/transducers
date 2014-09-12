@@ -1,6 +1,11 @@
 {-# LANGUAGE ExistentialQuantification,GADTs #-}
 
-module Transducers.FreeMonad(FreeMonadView(..),FreeMonad, fromView,toView) where
+module Transducers.FreeMonad(
+    FreeMonadView(..),
+    FreeMonad,
+    fromView,
+    toView,
+) where
 
 import Data.Interface.TSequence
 import Data.FastQueue
@@ -34,6 +39,7 @@ instance Monad (FreeMonad f) where
   (FM m r) >>= f = FM m (r >< tsingleton (FC f))
 
 instance Functor (FreeMonad r) where
+  {-# INLINE fmap #-}
   fmap f = liftM f
 
 instance Applicative (FreeMonad f) where
