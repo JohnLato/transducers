@@ -49,7 +49,7 @@ import Transducers.Stream
 
 import Control.Applicative
 import Control.Exception
-import Control.Monad ((>=>), liftM, when, replicateM_, forever)
+import Control.Monad ((>=>), liftM, when, replicateM_)
 import Control.Monad.IO.Class
 import Control.Monad.Trans
 import qualified Data.Foldable as Foldable
@@ -134,29 +134,6 @@ l0' ><> r0' = Trs $ go (unTRS l0') (unTRS r0')
          (Pure _                 , Impure (Try f))   -> l0 `go` f Nothing
 {-# NOINLINE [0] (><>) #-}
 
-
-dropInputs
-    :: (Functor m)
-    => FreeMonad (TransducerF e i o m) a
-    -> FreeMonad (TransducerF e x o m) a
-dropInputs t = case toView t of
-    Pure a -> return a
-    Impure (Try f)   -> dropInputs $ f Nothing
-    Impure (Yield o a) -> fromView $ Impure (Yield o (dropInputs a))
-    Impure (Panic e a) -> fromView $ Impure (Panic e (dropInputs a))
-    Impure (TLift m)   -> fromView $ Impure (TLift (dropInputs <$> m))
-
-dropOutputs
-    :: Functor m
-    => FreeMonad (TransducerF e i o m) a
-    -> FreeMonad (TransducerF e i x m) a
-dropOutputs t = case toView t of
-    Pure a -> return a
-    Impure (Yield _ a) -> dropOutputs a
-    Impure (Try f)     -> fromView $ Impure (Try $ dropOutputs <$> f)
-    Impure (Panic e a) -> fromView $ Impure (Panic e $ dropOutputs a)
-    Impure (TLift m)   -> fromView $ Impure (TLift $ dropOutputs <$> m)
-
 --------------------------------------------------
 -- higher-level API
 
@@ -238,7 +215,7 @@ mstep (Trs tr0) = loop tr0
 "<trx> lower/tmap" forall f. tmap f = overR (rmap f)
 "<trx> lower/tfilter" forall p. tfilter p = overR (rfilter p)
 "<trx> lower/mapM"    forall f. mapM f = overR (rmapM (lift . f))
-"<trx> lower/mealyM"  forall s f. mealyM s f = overR (rmealyM s (\s i -> lift (f s i)))
+"<trx> lower/mealyM"  forall s f. mealyM s f = overR (rmealyM s (\s' i -> lift (f s' i)))
 "<trx> lower/yieldList" forall xs. yieldList xs = overR (ryieldList xs)
 "<trx> lower/tfold" forall f. tfold f = replaceFold f
   -- I think I can do this more directly, maybe.
