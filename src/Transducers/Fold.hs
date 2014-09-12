@@ -1,14 +1,17 @@
 {-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TypeFamilies #-}
 
 module Transducers.Fold (
   Fold (..),
   Folding(..),
+  feed,
 
   foldM,
   mapM_,
 
   initFoldM,
+  dropWhileM,
 ) where
 
 import Prelude hiding (mapM_)
@@ -20,15 +23,21 @@ instance Functor m => Functor (Fold i m) where
     {-# INLINE fmap #-}
     fmap f (Fold s0 step mkOut) = Fold s0 step (fmap f . mkOut)
 
-class Folding f where
+class Functor f => Folding f where
     type Input f
     type FMonad f :: * -> *
     liftFold :: (Input f ~ i, FMonad f ~ m) => Fold i m a -> f a
 
-instance Folding (Fold i m) where
+instance Functor m => Folding (Fold i m) where
     type Input (Fold i m) = i
     type FMonad (Fold i m) = m
     liftFold = id
+
+-- | TODO: make this part of the Folding class
+feed :: Monad m => i -> Fold i m a -> m (Fold i m a)
+feed i (Fold s f mkOut) = do
+    s' <- f s i
+    return (Fold s' f mkOut)
 
 initFoldM :: (Folding f, Input f ~ i, FMonad f ~ m, Monad m)
     => m s -> (s -> i -> m s) -> f s
@@ -54,3 +63,18 @@ mapM_
     :: (Folding f, Input f ~ i, FMonad f ~ m, Monad m)
     => (i -> m ()) -> f ()
 mapM_ f = liftFold $ Fold () (\() i -> f i) return
+
+{-# INLINE dropWhileM #-}
+dropWhileM
+    :: (Folding f, Input f ~ i, FMonad f ~ m, Monad m)
+    => (i -> m Bool)
+    -> Fold i m a
+    -> f a
+dropWhileM p (Fold s0 f mkOut) = liftFold $ Fold Nothing f' mkOut'
+  where
+    f'2 s i = Just `liftM` f s i
+    f' Nothing i = p i >>= \case
+        True  -> return Nothing
+        False -> f'2 s0 i
+    f' (Just s) i = f'2 s i
+    mkOut' s = mkOut $ maybe s0 id s
