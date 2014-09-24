@@ -217,16 +217,16 @@ mstep (Trs tr0) = loop tr0
 "<trx> lower/mapM"    forall f. mapM f = overR (rmapM (lift . f))
 "<trx> lower/mealyM"  forall s f. mealyM s f = overR (rmealyM s (\s' i -> lift (f s' i)))
 "<trx> lower/yieldList" forall xs. yieldList xs = overR (ryieldList xs)
-"<trx> lower/tfold" forall f. tfold f = replaceFold f
+"<trx> lower/tfold" forall f. tfold f = foldOverR (rfold f)
   -- I think I can do this more directly, maybe.
-"<trx> lower/tscanl" forall f. tscanl f = overR (rfold f)
+"<trx> lower/tscanl" forall f. tscanl f = overR (rscan f)
 
 -- these all require a Functor constraint, which overly-complicates things...
 -- "<trx> lift/tmap"    [0] forall f. overR (rmap f) = tmap f
 -- "<trx> lift/tfilter" [0] forall p. overR (rfilter p) = tfilter p
 -- "<trx> lift/mapM"    [0] forall f. overR (rmapM (lift . f)) = mapM f
--- "<trx> lift/tfold"   [0] forall f. replaceFold f = tfold f
--- "<trx> lift/tscanl"  [0] forall f. overR (rfold f) = tscanl f
+-- "<trx> lift/tfold"   [0] forall f. foldOverR (rfold f) = tfold f
+-- "<trx> lift/tscanl"  [0] forall f. overR (rscan f) = tscanl f
     #-}
 -- TODO: fuse feed
 
@@ -264,28 +264,23 @@ flatten = foreach $ Foldable.mapM_ yield
 --------------------------------------------------
 -- Fusion stuff
 
-
-replaceFold :: (Functor m, Monad m) => Fold i m a -> Transducer e i () m a
-replaceFold f@(Fold.Fold s0 _ fOut) = foldOverR (fOut s0) (rfold f)
-{-# INLINE replaceFold #-}
-
 foldOverR
   :: (Functor m, Monad m)
-  => m a
-  -> (forall t. (MonadTrans t, Monad (t m)) => RStream e (t m) i -> RStream e (t m) a)
+  => (forall t. (MonadTrans t, Monad (t m)) => RStream e (t m) () i -> RStream e (t m) a o)
   -> Transducer e i () m a
-foldOverR a0 streamf = case streamf instream of
+  -- TODO: investigate turning this into a producer that outputs values
+foldOverR streamf = case streamf instream of
     RStream s0 step ->
-        let loop !sPEC prev s = step s >>= \case
-                RStep o s' -> loop SPEC o s'
-                RSkip s'   -> loop SPEC prev s'
-                Die e s'   -> panic e >> loop SPEC prev s'
-                RFinal     -> return prev
-        in lift a0 >>= \a0' -> loop SPEC a0' s0
+        let loop !sPEC s = step s >>= \case
+                RStep o s' -> loop SPEC s'
+                RSkip s'   -> loop SPEC s'
+                Die e s'   -> panic e >> loop SPEC s'
+                RFinal a   -> return a
+        in loop SPEC s0
   where
     instream = RStream () instep
     instep () = do
-        maybe RFinal (flip RStep ()) <$> tryAwait
+        maybe (RFinal ()) (flip RStep ()) <$> tryAwait
 {-# NOINLINE [0] foldOverR #-}
 
 -- Approach to fusion:
@@ -305,11 +300,11 @@ foldOverR a0 streamf = case streamf instream of
 --    Currently this only works well if users stick to provided functions
 --    or manually lower to streams.  Work on general fusion is ongoing..
 {-# RULES
-"<trx> overR/overR" forall (x :: forall t. (MonadTrans t, Monad (t m)) => RStream e (t m) a -> RStream e (t m) b) (y:: forall t. (MonadTrans t, Monad (t m)) => RStream e (t m) b -> RStream e (t m) c). (><>) (overR x) (overR y) = overR (y . x)
+"<trx> overR/overR" forall (x :: forall t. (MonadTrans t, Monad (t m)) => RStream e (t m) () a -> RStream e (t m) () b) (y:: forall t. (MonadTrans t, Monad (t m)) => RStream e (t m) () b -> RStream e (t m) o c). (><>) (overR x) (overR y) = overR (y . x)
 
-"<trx> overR/foldOverR" forall (x :: forall t. (MonadTrans t, Monad (t m)) => RStream e (t m) a -> RStream e (t m) b) y0 (y:: forall t. (MonadTrans t, Monad (t m)) => RStream e (t m) b -> RStream e (t m) c). overR x ><> foldOverR y0 y = foldOverR y0 (y . x)
+"<trx> overR/foldOverR" forall (x :: forall t. (MonadTrans t, Monad (t m)) => RStream e (t m) () a -> RStream e (t m) () b) (y:: forall t. (MonadTrans t, Monad (t m)) => RStream e (t m) () b -> RStream e (t m) o3 c). overR x ><> foldOverR y = foldOverR (y . x)
 
-"<trx> runTrans/foldOverR" forall o0 (f :: forall t. (MonadTrans t, Monad (t m)) => RStream e (t m) a -> RStream e (t m) b). runTrans (foldOverR o0 f) = o0 >>= \o -> runStreamF o f
+"<trx> runTrans/foldOverR" forall (f :: forall t. (MonadTrans t, Monad (t m)) => RStream e (t m) () a -> RStream e (t m) o2 b). runTrans (foldOverR f) = runStreamF f
     #-}
 
 -- so underR/overR means that Transducer is isomorphic to a stream transformer
@@ -317,15 +312,15 @@ foldOverR a0 streamf = case streamf instream of
 -- probably easier to think about (and probably better for certain
 -- recursive constructs)
 -- I don't have much use for 'underR' ATM.  Maybe I'll think of something...
-underR :: (Functor m, Monad m) => Transducer e i o m a -> RStream e m i -> RStream e m o
+underR :: (Functor m, Monad m) => Transducer e i o m a -> RStream e m a i -> RStream e m a o
 underR m (RStream s0 stepInStream) = RStream (unTRS m,s0) getNext
   where
-    getNext (toView -> Pure _,_) = return RFinal
+    getNext (toView -> Pure a,_) = return $ RFinal a
     getNext (aw@(toView -> (Impure (Try f))),s) = stepInStream s >>= \case
         RStep i s' -> getNext (f $ Just i, s')
         RSkip s'   -> getNext (aw, s')
         Die e s'   -> getNext (unTRS (panic e) >> aw, s')
-        RFinal     -> getNext (f Nothing, s)
+        RFinal a   -> getNext (f Nothing >> return a, s)
     getNext (toView -> Impure (Yield o a),s) = return $ RStep o (a,s)
     getNext (toView -> Impure (TLift n),s)   = n >>= getNext . (,s)
     getNext (toView -> Impure (Panic e k),s) = return $ Die e (k,s)
@@ -333,20 +328,20 @@ underR m (RStream s0 stepInStream) = RStream (unTRS m,s0) getNext
 
 overR
     :: (Monad m)
-    => (forall t. (MonadTrans t, Monad (t m)) => RStream e (t m) a -> RStream e (t m) b)
-    -> Transducer e a b m ()
+    => (forall t. (MonadTrans t, Monad (t m)) => RStream e (t m) () a -> RStream e (t m) o b)
+    -> Transducer e a b m o
 overR streamf = case streamf instream of
     RStream s0 step ->
         let loop !sPEC s = step s >>= \case
                 RStep o s' -> yield o >> loop SPEC s'
                 RSkip s'   -> loop SPEC s'
                 Die e s'   -> panic e >> loop SPEC s'
-                RFinal     -> return ()
+                RFinal o   -> return o
         in loop SPEC s0
   where
     instream = RStream () instep
     instep _ = do
-        maybe RFinal (flip RStep ()) <$> tryAwait
+        maybe (RFinal ()) (flip RStep ()) <$> tryAwait
 {-# NOINLINE [0] overR #-}
 
 -- run a transducer, ignoring all output values

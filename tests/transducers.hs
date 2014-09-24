@@ -3,7 +3,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE FlexibleContexts #-}
-{-# OPTIONS_GHC -Wall -fenable-rewrite-rules #-}
+{-# OPTIONS_GHC -Wall -fenable-rewrite-rules -ddump-rule-firings -ddump-to-file #-}
 
 import Control.Applicative
 import Control.Arrow (first)
@@ -50,7 +50,7 @@ main = defaultMain
   , testProperty "rewrite_tfilter" prop_rewrite_tfilter
   , testProperty "rewrite_flatten" prop_rewrite_flatten
   , testProperty "rewrite_tscanl" prop_rewrite_tscanl
-  -- , testProperty "rewrite_tfold" prop_rewrite_tfold
+  , testProperty "rewrite_tfold" prop_rewrite_tfold
   , testProperty "rewrite_mapM" prop_rewrite_mapM
   , testProperty "flatten/tfilter" prop_flatten_tfilter
   , testProperty "par" prop_par
@@ -359,8 +359,8 @@ prop_rewrite_tscanl iss
       return $! x + y
 
 -- does not hold, bug?
-_prop_rewrite_tfold :: [Int] -> Bool
-_prop_rewrite_tfold iss
+prop_rewrite_tfold :: [Int] -> Bool
+prop_rewrite_tfold iss
   = exec (tfold (TrFold.foldM f 0)) iss
     == (exec (NR.tfold (TrFold.foldM f 0)) iss :: Trace Int () Int)
   where
