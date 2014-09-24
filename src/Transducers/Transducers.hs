@@ -23,6 +23,7 @@ module Transducers.Transducers (
   -- * main API
   tmap,
   tfilter,
+  dropWhileM,
   mapM,
   mealyM,
   tfold,
@@ -185,6 +186,19 @@ mealyM s0 f = loop s0
             loop s'
 {-# NOINLINE [0] mealyM #-}
 
+dropWhileM
+    :: (Functor m, Monad m)
+    => (i -> m Bool)
+    -> Transducer e i i m ()
+dropWhileM p = dropLoop
+  where
+    dropLoop = tryAwait >>= \case
+        Nothing -> return ()
+        Just i -> lift (p i) >>= \case
+            True  -> dropLoop
+            False -> yield i >> idT
+{-# NOINLINE [0] dropWhileM #-}
+
 -- yieldList doesn't actually need the Monad constraint, but it's necessary for the yieldListR rule to work.
 yieldList :: Monad m => [i] -> Transducer e i i m ()
 yieldList xs = mapM_ yield xs >> idT
@@ -216,6 +230,7 @@ mstep (Trs tr0) = loop tr0
 "<trx> lower/tfilter" forall p. tfilter p = overR (rfilter p)
 "<trx> lower/mapM"    forall f. mapM f = overR (rmapM (lift . f))
 "<trx> lower/mealyM"  forall s f. mealyM s f = overR (rmealyM s (\s' i -> lift (f s' i)))
+"<trx> lower/dropWhileM" forall p. dropWhileM p = overR (rdropWhileM (lift . p))
 "<trx> lower/yieldList" forall xs. yieldList xs = overR (ryieldList xs)
 "<trx> lower/tfold" forall f. tfold f = foldOverR (rfold f)
   -- I think I can do this more directly, maybe.

@@ -10,8 +10,7 @@ module Transducers.Fold (
   foldM,
   mapM_,
 
-  initFoldM,
-  dropWhileM,
+  initFoldM
 ) where
 
 import Prelude hiding (mapM_)
@@ -63,18 +62,3 @@ mapM_
     :: (Folding f, Input f ~ i, FMonad f ~ m, Monad m)
     => (i -> m ()) -> f ()
 mapM_ f = liftFold $ Fold () (\() i -> f i) return
-
-{-# INLINE dropWhileM #-}
-dropWhileM
-    :: (Folding f, Input f ~ i, FMonad f ~ m, Monad m)
-    => (i -> m Bool)
-    -> Fold i m a
-    -> f a
-dropWhileM p (Fold s0 f mkOut) = liftFold $ Fold Nothing f' mkOut'
-  where
-    f'2 s i = Just `liftM` f s i
-    f' Nothing i = p i >>= \case
-        True  -> return Nothing
-        False -> f'2 s0 i
-    f' (Just s) i = f'2 s i
-    mkOut' s = mkOut $ maybe s0 id s

@@ -19,3 +19,5 @@ mapM = T.mapM
 flatten = T.flatten
 {-# NOINLINE unfold #-}
 unfold = T.unfold
+{-# NOINLINE dropWhileM #-}
+dropWhileM = T.dropWhileM

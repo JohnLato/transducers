@@ -43,6 +43,7 @@ main = defaultMain
   , testProperty "tmap" prop_tmap
   , testProperty "tfilter" prop_tfilter
   , testProperty "mapM" prop_mapM
+  , testProperty "mapM" prop_dropWhileM
   , testProperty "tfold" prop_tfold
   , testProperty "tscanl" prop_tscanl
   , testProperty "feed" prop_feed
@@ -52,6 +53,7 @@ main = defaultMain
   , testProperty "rewrite_tscanl" prop_rewrite_tscanl
   , testProperty "rewrite_tfold" prop_rewrite_tfold
   , testProperty "rewrite_mapM" prop_rewrite_mapM
+  , testProperty "rewrite_dropWhileM" prop_rewrite_dropWhileM
   , testProperty "flatten/tfilter" prop_flatten_tfilter
   , testProperty "par" prop_par
   ]
@@ -315,6 +317,17 @@ prop_mapM is =
       emit x
       return $ x + 1
 
+prop_dropWhileM :: [Int] -> Bool
+prop_dropWhileM is =
+  summary (Tr.dropWhileM f) (True, is) == ([], rest, dropped, Just ())
+  where
+    (dropped,rest) = span even is
+    f x = do
+        -- dropWhileM has to run the predicate until it fails, so
+        -- here we check the predicate before emitting the tested value
+        when (even x) $ emit x
+        return $ even x
+
 prop_tfold :: [Int] -> Bool
 prop_tfold is = summary (tfold (TrFold.foldM f 0)) (True, is)
   == ([], []::[()], is, Just (sum is))
@@ -375,6 +388,14 @@ prop_rewrite_mapM iss
     f x = do
       emit x
       return $! x + 1
+
+prop_rewrite_dropWhileM :: [Int] -> Bool
+prop_rewrite_dropWhileM iss
+  = exec (Tr.dropWhileM f) iss == exec (NR.dropWhileM f) iss
+  where
+    f x = do
+      emit x
+      return $ even x
 
 prop_flatten_tfilter :: [[Int]] -> Bool
 prop_flatten_tfilter iss
