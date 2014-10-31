@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE TupleSections #-}
 
 {-# OPTIONS -Wall -fno-warn-unused-matches #-}

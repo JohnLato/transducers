@@ -1,5 +1,7 @@
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE RankNTypes #-}
@@ -45,6 +47,7 @@ module Transducers.Transducers (
 import Prelude hiding (mapM)
 import Transducers.Fold (Fold)
 import qualified Transducers.Fold as Fold
+import Transducers.Fusion.Fold
 import Transducers.FreeMonad
 import Transducers.Stream
 
@@ -88,9 +91,9 @@ instance MonadTrans (Transducer e i o) where
 instance MonadIO m => MonadIO (Transducer e i o m) where
     liftIO = lift . liftIO
 
-instance (Functor m, Monad m) => Fold.Folding (Transducer e i o m) where
-    type Input (Transducer e i o m) = i
-    type FMonad (Transducer e i o m) = m
+instance (Functor m, Monad m) => Fold.Folding (Transducer e i () m) where
+    type Input (Transducer e i () m) = i
+    type FMonad (Transducer e i () m) = m
     {-# INLINE liftFold #-}
     liftFold = tfold
 
@@ -150,13 +153,13 @@ mapM :: Monad m => (i -> m o) -> Transducer e i o m ()
 mapM f = foreach $ lift . f >=> yield
 {-# NOINLINE [0] mapM #-}
 
-tfold :: (Functor m, Monad m) => Fold i m a -> Transducer e i o m a
+tfold :: (Functor m, Monad m) => Fold i m a -> Transducer e i () m a
 tfold (Fold.Fold s0 f outf) = loop s0
   where
     loop s = tryAwait >>= \case
         Nothing -> lift $ outf s
         Just x -> lift (f s x) >>= loop
-{-# INLINE [1] tfold #-}
+{-# INLINE [0] tfold #-}
 
 {-# RULES
 "<trx> fmap/tfold" forall f g. t_fmap f (tfold g) = tfold (fmap f g)
@@ -223,28 +226,6 @@ mstep (Trs tr0) = loop tr0
         Impure (TLift m) -> m >>= loop
         _                -> return (Trs tr)
 
--- TODO: all these should only happen in the first phases, by
--- the last phase we want to undo them...
-{-# RULES
-"<trx> lower/tmap" forall f. tmap f = overR (rmap f)
-"<trx> lower/tfilter" forall p. tfilter p = overR (rfilter p)
-"<trx> lower/mapM"    forall f. mapM f = overR (rmapM (lift . f))
-"<trx> lower/mealyM"  forall s f. mealyM s f = overR (rmealyM s (\s' i -> lift (f s' i)))
-"<trx> lower/dropWhileM" forall p. dropWhileM p = overR (rdropWhileM (lift . p))
-"<trx> lower/yieldList" forall xs. yieldList xs = overR (ryieldList xs)
-"<trx> lower/tfold" forall f. tfold f = foldOverR (rfold f)
-  -- I think I can do this more directly, maybe.
-"<trx> lower/tscanl" forall f. tscanl f = overR (rscan f)
-
--- these all require a Functor constraint, which overly-complicates things...
--- "<trx> lift/tmap"    [0] forall f. overR (rmap f) = tmap f
--- "<trx> lift/tfilter" [0] forall p. overR (rfilter p) = tfilter p
--- "<trx> lift/mapM"    [0] forall f. overR (rmapM (lift . f)) = mapM f
--- "<trx> lift/tfold"   [0] forall f. foldOverR (rfold f) = tfold f
--- "<trx> lift/tscanl"  [0] forall f. overR (rscan f) = tscanl f
-    #-}
--- TODO: fuse feed
-
 --------------------------------------------------
 -- concat/flatten-type things
 
@@ -279,24 +260,7 @@ flatten = foreach $ Foldable.mapM_ yield
 --------------------------------------------------
 -- Fusion stuff
 
-foldOverR
-  :: (Functor m, Monad m)
-  => (forall t. (MonadTrans t, Monad (t m)) => RStream e (t m) () i -> RStream e (t m) a o)
-  -> Transducer e i () m a
-  -- TODO: investigate turning this into a producer that outputs values
-foldOverR streamf = case streamf instream of
-    RStream s0 step ->
-        let loop !sPEC s = step s >>= \case
-                RStep o s' -> loop SPEC s'
-                RSkip s'   -> loop SPEC s'
-                Die e s'   -> panic e >> loop SPEC s'
-                RFinal a   -> return a
-        in loop SPEC s0
-  where
-    instream = RStream () instep
-    instep () = do
-        maybe (RFinal ()) (flip RStep ()) <$> tryAwait
-{-# NOINLINE [0] foldOverR #-}
+-- producer-flow
 
 -- Approach to fusion:
 --    first we transform a Transducer to a stream function
@@ -317,9 +281,11 @@ foldOverR streamf = case streamf instream of
 {-# RULES
 "<trx> overR/overR" forall (x :: forall t. (MonadTrans t, Monad (t m)) => RStream e (t m) () a -> RStream e (t m) () b) (y:: forall t. (MonadTrans t, Monad (t m)) => RStream e (t m) () b -> RStream e (t m) o c). (><>) (overR x) (overR y) = overR (y . x)
 
+"<trx> runTrans/foldOverR" forall (f :: forall t. (MonadTrans t, Monad (t m)) => RStream e (t m) () a -> RStream e (t m) o2 b). runTrans (foldOverR f) = runStreamF f
+
+"<trx> overR/fold" forall (x :: forall t. (MonadTrans t, Monad (t m)) => RStream e (t m) () a -> RStream e (t m) o b) y. (><>) (overR x) (tfold y) = foldOverR (rfold y . x)
 "<trx> overR/foldOverR" forall (x :: forall t. (MonadTrans t, Monad (t m)) => RStream e (t m) () a -> RStream e (t m) () b) (y:: forall t. (MonadTrans t, Monad (t m)) => RStream e (t m) () b -> RStream e (t m) o3 c). overR x ><> foldOverR y = foldOverR (y . x)
 
-"<trx> runTrans/foldOverR" forall (f :: forall t. (MonadTrans t, Monad (t m)) => RStream e (t m) () a -> RStream e (t m) o2 b). runTrans (foldOverR f) = runStreamF f
     #-}
 
 -- so underR/overR means that Transducer is isomorphic to a stream transformer
@@ -358,6 +324,84 @@ overR streamf = case streamf instream of
     instep _ = do
         maybe (RFinal ()) (flip RStep ()) <$> tryAwait
 {-# NOINLINE [0] overR #-}
+
+-- like overR, but specializes the stream output to (), and doesn't ever
+-- actually yield anything.
+foldOverR
+  :: (Functor m, Monad m)
+  => (forall t. (MonadTrans t, Monad (t m)) => RStream e (t m) () i -> RStream e (t m) a o)
+  -> Transducer e i () m a
+  -- TODO: investigate turning this into a producer that outputs values
+foldOverR streamf = case streamf instream of
+    RStream s0 step ->
+        let loop !sPEC s = step s >>= \case
+                RStep o s' -> loop SPEC s'
+                RSkip s'   -> loop SPEC s'
+                Die e s'   -> panic e >> loop SPEC s'
+                RFinal a   -> return a
+        in loop SPEC s0
+  where
+    instream = RStream () instep
+    instep () = do
+        maybe (RFinal ()) (flip RStep ()) <$> tryAwait
+{-# NOINLINE [0] foldOverR #-}
+
+
+#define STREAMMATCH(RNAME,VARS,RHS) "<trx> stream/RNAME" forall VARS (g :: forall t. (MonadTrans t, Monad (t m)) => RStream e (t m) () a -> RStream e (t m) y b). (><>) (RNAME VARS) (overR g) = overR (g .  RHS)
+#define STREAMMATCH2(RNAME,VARS,RHS) "<trx> l-stream/RNAME" forall VARS (g :: forall t. (MonadTrans t, Monad (t m)) => RStream e (t m) () a -> RStream e (t m) () b). (><>) (overR g) (RNAME VARS) = overR (RHS . g)
+#define STREAMMATCH3(RNAME,VARS,RHS) "<trx> l-stream/RNAME reassoc" forall VARS (g :: forall t. (MonadTrans t, Monad (t m)) => RStream e (t m) () a -> RStream e (t m) () b) h. (><>) (overR g) ((><>) (RNAME VARS) h) = overR (RHS . g) ><> h
+#define FOLDMATCH(RNAME,VARS,RHS) "<trx> RNAME/fold" forall VARS g. (><>) (RNAME VARS) (tfold g) = tfold (RHS g)
+
+{-# RULES
+STREAMMATCH(tfilter,p,rfilter p)
+STREAMMATCH(tmap,f,rmap f)
+STREAMMATCH(mapM,f,rmapM (lift . f))
+STREAMMATCH(dropWhileM,p,rdropWhileM (lift . p))
+STREAMMATCH(mealyM,s f,rmealyM s (\s' i -> lift (f s' i)))
+
+STREAMMATCH2(tfilter,p,rfilter p)
+STREAMMATCH2(tmap,f,rmap f)
+STREAMMATCH2(mapM,f,rmapM (lift . f))
+STREAMMATCH2(dropWhileM,p,rdropWhileM (lift . p))
+-- STREAMMATCH2(mealyM,s f,rmealyM s (\s' i -> lift (f s' i)))
+
+STREAMMATCH3(tfilter,p,rfilter p)
+STREAMMATCH3(tmap,f,rmap f)
+STREAMMATCH3(mapM,f,rmapM (lift . f))
+STREAMMATCH3(dropWhileM,p,rdropWhileM (lift . p))
+
+"<trx> produce/yieldList" forall xs. yieldList xs = overR (ryieldList xs)
+
+FOLDMATCH(tfilter,p,f_filter p)
+FOLDMATCH(tmap,f,f_map f)
+FOLDMATCH(mapM,f,f_mapM f)
+FOLDMATCH(dropWhileM,p,f_dropWhileM p)
+FOLDMATCH(mealyM,s f,f_mealyM s f)
+
+  -- I think I can do this more directly, maybe.
+"<trx> prod/tscanl" forall f. tscanl f = overR (rscan f)
+    #-}
+-- TODO: fuse feed
+
+{-
+-- consumer-flow
+overF
+    :: Monad m
+    => (forall t b. (MonadTrans t, Monad (t m)) => Fold o (t m) b -> Fold i (t m) a)
+    -> Transducer e i o m a
+overF foldf = case foldf outfold of
+    Fold.Fold s0 f mkOut ->
+      let loop !sPEC s = tryAwait >>= \case
+              Just i  -> f s i >>= loop SPEC
+              Nothing -> mkOut s
+      in loop SPEC s0
+  where
+    outfold = Fold.Fold () outstep (const $ return ())
+    outstep _ o = yield o
+{-# NOINLINE [0] overF #-}
+-}
+
+--------------------------------------------------
 
 -- run a transducer, ignoring all output values
 {-# NOINLINE [0] runTrans #-}

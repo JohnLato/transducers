@@ -2,6 +2,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TypeFamilies #-}
 
+{-# OPTIONS -Wall #-}
 module Transducers.Fold (
   Fold (..),
   Folding(..),
@@ -10,7 +11,7 @@ module Transducers.Fold (
   foldM,
   mapM_,
 
-  initFoldM
+  initFoldM,
 ) where
 
 import Prelude hiding (mapM_)
@@ -57,8 +58,10 @@ foldM
     -> a
     -> f a
 foldM f s0 = liftFold $ Fold s0 f return
+{-# INLINE foldM #-}
 
 mapM_
     :: (Folding f, Input f ~ i, FMonad f ~ m, Monad m)
     => (i -> m ()) -> f ()
 mapM_ f = liftFold $ Fold () (\() i -> f i) return
+{-# INLINE mapM_ #-}
