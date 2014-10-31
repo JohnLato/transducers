@@ -9,7 +9,7 @@
 {-# LANGUAGE  ViewPatterns #-}
 
 {-# OPTIONS -Wall -fno-warn-unused-matches #-}
-module Transducers.Stream (
+module Transducers.Fusion.Stream (
   SPEC (..),
   RStream (..),
   RStep (..),

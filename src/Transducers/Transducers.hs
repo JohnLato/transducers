@@ -48,8 +48,8 @@ import Prelude hiding (mapM)
 import Transducers.Fold (Fold)
 import qualified Transducers.Fold as Fold
 import Transducers.Fusion.Fold
+import Transducers.Fusion.Stream
 import Transducers.FreeMonad
-import Transducers.Stream
 
 import Control.Applicative
 import Control.Exception

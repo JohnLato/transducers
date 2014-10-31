@@ -18,7 +18,7 @@ cabal-version:       >=1.10
 library
   exposed-modules:     Transducers, Data.FastQueue, Data.TConsList,
                        Data.TSnocList, Data.RTQueue, Data.CTQueue, Data.Interface.TSequence,
-                       Transducers.FreeMonad, Transducers.Stream, Transducers.Fusion.Fold, Transducers.Fold, Transducers.Transducers, Transducers.Par
+                       Transducers.FreeMonad, Transducers.Fusion.Stream, Transducers.Fusion.Fold, Transducers.Fold, Transducers.Transducers, Transducers.Par
   -- other-modules:       
   other-extensions:    TupleSections, GADTs, ViewPatterns, TypeOperators, TypeSynonymInstances, FlexibleInstances, ExistentialQuantification, BangPatterns, DeriveFunctor, GeneralizedNewtypeDeriving, LambdaCase, RankNTypes, ScopedTypeVariables, TypeFamilies
   build-depends:       base >=4.6 && <4.8, mtl >=2.1 && <2.3, transformers >=0.3 && <0.5, async

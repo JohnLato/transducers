@@ -8,7 +8,7 @@ module Transducers.Par (
 
 import Transducers.Fold
 import Transducers.FreeMonad
-import Transducers.Stream
+import Transducers.Fusion.Stream
 import Transducers.Transducers
 import Control.Concurrent.Async
 
