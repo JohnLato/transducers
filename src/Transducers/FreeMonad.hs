@@ -16,7 +16,7 @@ import Control.Applicative
 newtype FC f a b = FC (a -> FreeMonad f b)
 type FMExp f a b = FastQueue (FC f) a b
 
-data FreeMonad f a = 
+data FreeMonad f a =
    forall x. FM (FreeMonadView f x) (FMExp f x a)
 data FreeMonadView f a  =
        Impure (f (FreeMonad f a))
@@ -30,8 +30,8 @@ toView (FM h t) = case h of
     case tviewl t of
        TEmptyL -> Pure x
        FC hc :| tc -> toView (hc x >>>= tc)
-   Impure f -> Impure (fmap (>>>= t) f) 
- where (>>>=) :: FreeMonad f a -> FMExp f a b -> FreeMonad f b 
+   Impure f -> Impure (fmap (>>>= t) f)
+ where (>>>=) :: FreeMonad f a -> FMExp f a b -> FreeMonad f b
        (FM h t) >>>= r = FM h (t >< r)
 
 instance Monad (FreeMonad f) where

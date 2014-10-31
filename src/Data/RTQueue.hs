@@ -23,7 +23,7 @@ data RTQueue tc a b where
   RQ :: !(TConsList tc a b) -> !(TSnocList tc b c) -> !(TConsList tc x b) -> RTQueue tc a c
 
 queue :: TConsList tc a b -> TSnocList tc b c -> TConsList tc x b -> RTQueue tc a c
-queue f r CNil = let f' = revAppend f r 
+queue f r CNil = let f' = revAppend f r
                  in RQ f' SNil f'
 queue f r (h `Cons` t) = RQ f r t
 

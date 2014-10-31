@@ -9,7 +9,7 @@ import Data.Interface.TSequence
 -- A purely functional catenable queue representation with
 -- that turns takes a purely functional queue and turns in it into
 -- a catenable queue, i.e. with the same complexity for (><) as for (|>)
--- Based on Purely functional data structures by Chris Okasaki 
+-- Based on Purely functional data structures by Chris Okasaki
 -- section 7.2: Catenable lists
 
 data CTQueue q c x y where
