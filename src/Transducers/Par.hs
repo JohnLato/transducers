@@ -40,7 +40,7 @@ parT (Trs tr0) = careful tr0
 
 {-# RULES
 "parT/parF" forall f. parT (tfold f) = tfold (parF f)
-"parT/foldOverR" forall f. parT (foldOverR (rfold f)) = tfold (parF f)
+"parT/foldOverR" forall f. parT (foldOverR (r_fold f)) = tfold (parF f)
   -- need this because tfold might get replaced before the first rule
   -- fires
     #-}

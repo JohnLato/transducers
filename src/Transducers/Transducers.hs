@@ -251,10 +251,10 @@ flatten = foreach $ Foldable.mapM_ yield
 {-# INLINE [0] flatten #-}
 
 {-# RULES
-"<trx> flatten/list"  flatten = overR rflattenList
-"<trx> flatten/maybe" flatten = overR rflattenMaybe
-"<trx> treplicate" forall n. treplicate n = overR (rreplicate n)
-"<trx> unfold" forall mkS unf. unfold mkS unf = overR (runfold mkS unf)
+"<trx> flatten/list"  flatten = overR r_flattenList
+"<trx> flatten/maybe" flatten = overR r_flattenMaybe
+"<trx> treplicate" forall n. treplicate n = overR (r_replicate n)
+"<trx> unfold" forall mkS unf. unfold mkS unf = overR (r_unfold mkS unf)
     #-}
 
 --------------------------------------------------
@@ -283,7 +283,7 @@ flatten = foreach $ Foldable.mapM_ yield
 
 "<trx> runTrans/foldOverR" forall (f :: forall t. (MonadTrans t, Monad (t m)) => RStream e (t m) () a -> RStream e (t m) o2 b). runTrans (foldOverR f) = runStreamF f
 
-"<trx> overR/fold" forall (x :: forall t. (MonadTrans t, Monad (t m)) => RStream e (t m) () a -> RStream e (t m) o b) y. (><>) (overR x) (tfold y) = foldOverR (rfold y . x)
+"<trx> overR/fold" forall (x :: forall t. (MonadTrans t, Monad (t m)) => RStream e (t m) () a -> RStream e (t m) o b) y. (><>) (overR x) (tfold y) = foldOverR (r_fold y . x)
 "<trx> overR/foldOverR" forall (x :: forall t. (MonadTrans t, Monad (t m)) => RStream e (t m) () a -> RStream e (t m) () b) (y:: forall t. (MonadTrans t, Monad (t m)) => RStream e (t m) () b -> RStream e (t m) o3 c). overR x ><> foldOverR y = foldOverR (y . x)
 
     #-}
@@ -353,24 +353,24 @@ foldOverR streamf = case streamf instream of
 #define FOLDMATCH(RNAME,VARS,RHS) "<trx> RNAME/fold" forall VARS g. (><>) (RNAME VARS) (tfold g) = tfold (RHS g)
 
 {-# RULES
-STREAMMATCH(tfilter,p,rfilter p)
-STREAMMATCH(tmap,f,rmap f)
-STREAMMATCH(mapM,f,rmapM (lift . f))
-STREAMMATCH(dropWhileM,p,rdropWhileM (lift . p))
-STREAMMATCH(mealyM,s f,rmealyM s (\s' i -> lift (f s' i)))
+STREAMMATCH(tfilter,p,r_filter p)
+STREAMMATCH(tmap,f,r_map f)
+STREAMMATCH(mapM,f,r_mapM (lift . f))
+STREAMMATCH(dropWhileM,p,r_dropWhileM (lift . p))
+STREAMMATCH(mealyM,s f,r_mealyM s (\s' i -> lift (f s' i)))
 
-STREAMMATCH2(tfilter,p,rfilter p)
-STREAMMATCH2(tmap,f,rmap f)
-STREAMMATCH2(mapM,f,rmapM (lift . f))
-STREAMMATCH2(dropWhileM,p,rdropWhileM (lift . p))
--- STREAMMATCH2(mealyM,s f,rmealyM s (\s' i -> lift (f s' i)))
+STREAMMATCH2(tfilter,p,r_filter p)
+STREAMMATCH2(tmap,f,r_map f)
+STREAMMATCH2(mapM,f,r_mapM (lift . f))
+STREAMMATCH2(dropWhileM,p,r_dropWhileM (lift . p))
+-- STREAMMATCH2(mealyM,s f,r_mealyM s (\s' i -> lift (f s' i)))
 
-STREAMMATCH3(tfilter,p,rfilter p)
-STREAMMATCH3(tmap,f,rmap f)
-STREAMMATCH3(mapM,f,rmapM (lift . f))
-STREAMMATCH3(dropWhileM,p,rdropWhileM (lift . p))
+STREAMMATCH3(tfilter,p,r_filter p)
+STREAMMATCH3(tmap,f,r_map f)
+STREAMMATCH3(mapM,f,r_mapM (lift . f))
+STREAMMATCH3(dropWhileM,p,r_dropWhileM (lift . p))
 
-"<trx> produce/yieldList" forall xs. yieldList xs = overR (ryieldList xs)
+"<trx> produce/yieldList" forall xs. yieldList xs = overR (r_yieldList xs)
 
 FOLDMATCH(tfilter,p,f_filter p)
 FOLDMATCH(tmap,f,f_map f)
@@ -379,7 +379,7 @@ FOLDMATCH(dropWhileM,p,f_dropWhileM p)
 FOLDMATCH(mealyM,s f,f_mealyM s f)
 
   -- I think I can do this more directly, maybe.
-"<trx> prod/tscanl" forall f. tscanl f = overR (rscan f)
+"<trx> prod/tscanl" forall f. tscanl f = overR (r_scan f)
     #-}
 -- TODO: fuse feed
 

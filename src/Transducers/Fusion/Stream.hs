@@ -14,22 +14,22 @@ module Transducers.Fusion.Stream (
   RStream (..),
   RStep (..),
 
-  rmap,
-  rfilter,
-  rmapM,
-  rmealyM,
-  rdropWhileM,
+  r_map,
+  r_filter,
+  r_mapM,
+  r_mealyM,
+  r_dropWhileM,
   emptyStream,
-  ryieldList,
-  rfold,
-  rscan,
+  r_yieldList,
+  r_fold,
+  r_scan,
   runStreamF,
 
-  rflatten,
-  rflattenList,
-  rflattenMaybe,
-  rreplicate,
-  runfold,
+  r_flatten,
+  r_flattenList,
+  r_flattenMaybe,
+  r_replicate,
+  r_unfold,
 ) where
 
 import Transducers.Fold (Fold)
@@ -67,10 +67,10 @@ data RStep e s o a =
 -- keep these separate from monadic variants because the types
 -- are simpler (and ghc has a better change of making rules match)
 
-{-# INLINE [1] rmap #-}
+{-# INLINE [1] r_map #-}
 -- | map between streams
-rmap :: Monad m => (a -> b) -> RStream e m o a -> RStream e m o b
-rmap f (RStream s0 step) = RStream s0 go
+r_map :: Monad m => (a -> b) -> RStream e m o a -> RStream e m o b
+r_map f (RStream s0 step) = RStream s0 go
   where
     {-# INLINE [0] go #-}
     go s = do
@@ -81,10 +81,10 @@ rmap f (RStream s0 step) = RStream s0 go
           Die err s' -> return $ Die err s'
           RFinal o   -> return $ RFinal o
 
-{-# INLINE [1] rfilter #-}
+{-# INLINE [1] r_filter #-}
 -- | filter a stream
-rfilter :: Monad m => (a -> Bool) -> RStream e m o a -> RStream e m o a
-rfilter p (RStream s0 step) = RStream s0 go
+r_filter :: Monad m => (a -> Bool) -> RStream e m o a -> RStream e m o a
+r_filter p (RStream s0 step) = RStream s0 go
   where
     {-# INLINE [0] go #-}
     go s = step s >>= \case
@@ -96,10 +96,10 @@ rfilter p (RStream s0 step) = RStream s0 go
 --------------------------------------------------
 -- Monadic Stream transformers
 
-{-# INLINE [1] rmapM #-}
+{-# INLINE [1] r_mapM #-}
 -- | monadic map between streams
-rmapM :: Monad m => (a -> m b) -> RStream e m o a -> RStream e m o b
-rmapM f (RStream s0 step) = RStream s0 go
+r_mapM :: Monad m => (a -> m b) -> RStream e m o a -> RStream e m o b
+r_mapM f (RStream s0 step) = RStream s0 go
   where
     {-# INLINE [0] go #-}
     go s = do
@@ -110,9 +110,9 @@ rmapM f (RStream s0 step) = RStream s0 go
           Die err s' -> return $ Die err s'
           RFinal o   -> return $ RFinal o
 
-{-# INLINE [0] rmealyM #-}
-rmealyM :: Monad m => s -> (s -> i -> m (a,s)) -> RStream e m o i -> RStream e m o a
-rmealyM s0 f (RStream rs0 step) = RStream (s0,rs0) go
+{-# INLINE [0] r_mealyM #-}
+r_mealyM :: Monad m => s -> (s -> i -> m (a,s)) -> RStream e m o i -> RStream e m o a
+r_mealyM s0 f (RStream rs0 step) = RStream (s0,rs0) go
   where
     {-# INLINE [0] go #-}
     go (s,rs) = do
@@ -123,9 +123,9 @@ rmealyM s0 f (RStream rs0 step) = RStream (s0,rs0) go
             Die err rs' -> return $ Die err (s,rs')
             RFinal o    -> return $ RFinal o
 
-{-# INLINE [1] rdropWhileM #-}
-rdropWhileM :: Monad m => (i -> m Bool) -> RStream e m o i -> RStream e m o i
-rdropWhileM p (RStream rs0 step) = RStream (True,rs0) go
+{-# INLINE [1] r_dropWhileM #-}
+r_dropWhileM :: Monad m => (i -> m Bool) -> RStream e m o i -> RStream e m o i
+r_dropWhileM p (RStream rs0 step) = RStream (True,rs0) go
   where
     {-# INLINE [0] go #-}
     go (check,rs) = do
@@ -143,32 +143,32 @@ rdropWhileM p (RStream rs0 step) = RStream (True,rs0) go
 --------------------------------------------------
 -- flatteners
 
-{-# INLINE rreplicate #-}
-rreplicate :: Monad m => Int -> RStream e m o a -> RStream e m o a
-rreplicate n0 = rflatten (n0,) go
+{-# INLINE r_replicate #-}
+r_replicate :: Monad m => Int -> RStream e m o a -> RStream e m o a
+r_replicate n0 = r_flatten (n0,) go
   where
     go (0,_) = RFinal ()
     go (n,a) = RStep a (n-1,a)
 
-{-# INLINE runfold #-}
-runfold :: Monad m => (i -> s) -> (s -> Maybe (a,s))
+{-# INLINE r_unfold #-}
+r_unfold :: Monad m => (i -> s) -> (s -> Maybe (a,s))
         -> RStream e m o i -> RStream e m o a
-runfold mkS unf = rflatten mkS step
+r_unfold mkS unf = r_flatten mkS step
   where
     step s = case unf s of
         Just (o,s') -> RStep o s'
         Nothing     -> RFinal ()
 
-{-# INLINE rflattenList #-}
-rflattenList :: Monad m => RStream e m o [a] -> RStream e m o a
-rflattenList = rflatten id uncons
+{-# INLINE r_flattenList #-}
+r_flattenList :: Monad m => RStream e m o [a] -> RStream e m o a
+r_flattenList = r_flatten id uncons
   where
     uncons [] = RFinal ()
     uncons (x:xs) = RStep x xs
 
-{-# INLINE rflattenMaybe #-}
-rflattenMaybe :: Monad m => RStream e m o (Maybe a) -> RStream e m o a
-rflattenMaybe = rflatten id uncons
+{-# INLINE r_flattenMaybe #-}
+r_flattenMaybe :: Monad m => RStream e m o (Maybe a) -> RStream e m o a
+r_flattenMaybe = r_flatten id uncons
   where
     uncons (Just x) = RStep x Nothing
     uncons Nothing = RFinal ()
@@ -180,11 +180,11 @@ data FlattenState a b =
     Outer a
   | Inner a b
 
-{-# INLINE [1] rflatten #-}
-rflatten
+{-# INLINE [1] r_flatten #-}
+r_flatten
     :: Monad m => (a -> s) -> (s -> RStep e s () b)
     -> RStream e m o a -> RStream e m o b
-rflatten mkS0 flattenStep (RStream s0 step) = RStream (Outer s0) go
+r_flatten mkS0 flattenStep (RStream s0 step) = RStream (Outer s0) go
   where
     {-# INLINE [0] go #-}
     go (Outer s) = step s >>= \case
@@ -205,21 +205,21 @@ rflatten mkS0 flattenStep (RStream s0 step) = RStream (Outer s0) go
 emptyStream :: Monad m => RStream e m () a
 emptyStream = RStream () (\() -> return $ RFinal ())
 
--- | ryieldList takes an input stream that is entirely ignored.
+-- | r_yieldList takes an input stream that is entirely ignored.
 -- This is so it can use the same fusion functions as the regular
 -- stream transformers
-ryieldList :: Monad m => [a] -> RStream e m z i -> RStream e m () a
-ryieldList xs0 _ = RStream xs0 go
+r_yieldList :: Monad m => [a] -> RStream e m z i -> RStream e m () a
+r_yieldList xs0 _ = RStream xs0 go
   where
     go (x:xs) = return $ RStep x xs
     go []     = return $ RFinal ()
 
 -- | transform a Fold into a stream scan.
-{-# INLINE [1] rscan #-}
-rscan
+{-# INLINE [1] r_scan #-}
+r_scan
     :: (MonadTrans t, Monad m, Monad (t m))
     => Fold i m a -> RStream e (t m) b i -> RStream e (t m) b a
-rscan (Fold.Fold s0 ff fout) (RStream r0 rstep) = RStream (s0,r0) go
+r_scan (Fold.Fold s0 ff fout) (RStream r0 rstep) = RStream (s0,r0) go
   where
     {-# INLINE [0] go #-}
     go (fstate,rstate) = rstep rstate >>= \case
@@ -233,11 +233,11 @@ rscan (Fold.Fold s0 ff fout) (RStream r0 rstep) = RStream (s0,r0) go
 
 
 -- | transform a Fold into a stream function.
-{-# INLINE [1] rfold #-}
-rfold
+{-# INLINE [1] r_fold #-}
+r_fold
     :: (MonadTrans t, Monad m, Monad (t m))
     => Fold i m a -> RStream e (t m) b i -> RStream e (t m) a i
-rfold (Fold.Fold s0 ff fout) (RStream r0 rstep) = RStream (s0,r0) go
+r_fold (Fold.Fold s0 ff fout) (RStream r0 rstep) = RStream (s0,r0) go
   where
     {-# INLINE [0] go #-}
     go (fstate,rstate) = rstep rstate >>= \case
