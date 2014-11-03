@@ -176,8 +176,7 @@ tscanl (Fold.Fold s0 f outf) = loop s0
             loop s'
 {-# NOINLINE [0] tscanl #-}
 
--- TODO: this should return the final state, but then I can't make fusion work
--- until I add a return val to RStream
+-- TODO: this should return the final state
 mealyM :: (Functor m, Monad m) => s -> (s -> i -> m (o,s)) -> Transducer e i o m ()
 mealyM s0 f = loop s0
   where

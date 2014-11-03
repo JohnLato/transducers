@@ -110,7 +110,7 @@ r_mapM f (RStream s0 step) = RStream s0 go
           Die err s' -> return $ Die err s'
           RFinal o   -> return $ RFinal o
 
-{-# INLINE [0] r_mealyM #-}
+{-# INLINE [1] r_mealyM #-}
 r_mealyM :: Monad m => s -> (s -> i -> m (a,s)) -> RStream e m o i -> RStream e m o a
 r_mealyM s0 f (RStream rs0 step) = RStream (s0,rs0) go
   where
