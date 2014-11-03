@@ -33,6 +33,8 @@ module Transducers.Transducers (
   flatten,
   treplicate,
   unfold,
+  zip,
+  sequence_,
 
   yieldList,
   feed,
@@ -44,7 +46,7 @@ module Transducers.Transducers (
   underR,
 ) where
 
-import Prelude hiding (mapM)
+import Prelude hiding (zip,mapM,sequence_)
 import Transducers.Fold (Fold)
 import qualified Transducers.Fold as Fold
 import Transducers.Fusion.Fold
@@ -91,9 +93,9 @@ instance MonadTrans (Transducer e i o) where
 instance MonadIO m => MonadIO (Transducer e i o m) where
     liftIO = lift . liftIO
 
-instance (Functor m, Monad m) => Fold.Folding (Transducer e i () m) where
-    type Input (Transducer e i () m) = i
-    type FMonad (Transducer e i () m) = m
+instance (Functor m, Monad m) => Fold.Folding (Transducer e i o m) where
+    type Input (Transducer e i o m) = i
+    type FMonad (Transducer e i o m) = m
     {-# INLINE liftFold #-}
     liftFold = tfold
 
@@ -153,7 +155,7 @@ mapM :: Monad m => (i -> m o) -> Transducer e i o m ()
 mapM f = foreach $ lift . f >=> yield
 {-# NOINLINE [0] mapM #-}
 
-tfold :: (Functor m, Monad m) => Fold i m a -> Transducer e i () m a
+tfold :: (Functor m, Monad m) => Fold i m a -> Transducer e i o m a
 tfold (Fold.Fold s0 f outf) = loop s0
   where
     loop s = tryAwait >>= \case
@@ -201,6 +203,28 @@ dropWhileM p = dropLoop
             False -> yield i >> idT
 {-# NOINLINE [0] dropWhileM #-}
 
+-- | Zip two transducers together, so that inputs are applied to both.
+zip :: (Functor m, Monad m) => Transducer e i o m a -> Transducer e i o m b -> Transducer e i o m (a,b)
+zip l0 r0 = loop l0 r0
+  where
+    loop l r = do
+        i <- tryAwait
+        l' <- feed1 i l
+        r' <- feed1 i r
+        case (tryGetTrans l', tryGetTrans r') of
+            (Just a, _) -> (a,) <$> r'
+            (_,Just b)  -> (,b) <$> l'
+            (Nothing,Nothing) -> loop l' r'
+{-# NOINLINE [0] zip #-}
+
+sequence_ :: (Functor m, Monad m) => [Transducer e i o m a] -> Transducer e i o m ()
+sequence_ xs = foldr (\l r -> () <$ zip l r) (Fold.liftFold f_null) xs
+{-# INLINE sequence_ #-}
+
+{-# RULES
+"<trx> zip/fold" forall f g. zip (tfold f) (tfold g) = tfold (f_zip f g)
+    #-}
+
 -- yieldList doesn't actually need the Monad constraint, but it's necessary for the yieldListR rule to work.
 yieldList :: Monad m => [i] -> Transducer e i i m ()
 yieldList xs = mapM_ yield xs >> idT
@@ -215,6 +239,18 @@ feed i (Trs tr0) = Trs $ loop tr0
         Impure (Try f)   -> f (Just i)
         Impure f -> fromView $ Impure (loop <$> f)
         Pure _ -> tr
+
+feed1
+    :: (Functor m, Monad m)
+    => Maybe i -> Transducer e i o m a -> Transducer e i' o m (Transducer e i o m a)
+feed1 i (Trs tr0) = loop tr0
+  where
+    loop tr = case toView tr of
+        Impure (Try f)     -> return . Trs $ f i
+        Impure (Yield o m) -> yield o >> loop m
+        Impure (TLift m)   -> lift m >>= loop
+        Impure (Panic e m) -> panic e >> loop m
+        Pure a             -> return $ return a
 
 -- attempt to step the transducer by performing any monadic actions
 -- TODO: generalize this to dump any 'o's somewhere
@@ -413,6 +449,13 @@ runTrans t0 = go SPEC $ unTRS t0
       Impure (Panic e _) -> throw e
       Impure (TLift m)   -> m >>= go SPEC
       Impure (Yield _ m) -> go SPEC m
+
+-- | Attempt to retrieve the output value of a transducer without performing
+-- any extra evaluations.
+tryGetTrans :: (Functor m, Monad m) => Transducer e i o m a -> Maybe a
+tryGetTrans t0 = case toView $ unTRS t0 of
+    Pure a -> Just a
+    _ -> Nothing
 
 --------------------------------------------------
 -- Internal
