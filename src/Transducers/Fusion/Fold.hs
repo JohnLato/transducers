@@ -32,6 +32,7 @@ f_mapM f (Fold s0 fStep mkOut) = Fold s0 f' mkOut
     {-# INLINE [0] f' #-}
     f' s i = f i >>= \o -> fStep s o
 
+{-# INLINE [1] f_dropWhileM #-}
 f_dropWhileM :: Monad m => (i -> m Bool) -> Fold i m a -> Fold i m a
 f_dropWhileM p (Fold s0 fStep mkOut) = Fold (True,s0) f' (mkOut.snd)
   where

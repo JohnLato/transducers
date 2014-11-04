@@ -15,13 +15,24 @@ module Transducers.Fold (
 ) where
 
 import Prelude hiding (mapM_)
+import Control.Applicative
 import Control.Monad (liftM)
 
 data Fold i m a = forall s. Fold s (s -> i -> m s) (s -> m a)
 
 instance Functor m => Functor (Fold i m) where
     {-# INLINE fmap #-}
-    fmap f (Fold s0 step mkOut) = Fold s0 step (fmap f . mkOut)
+    fmap f = f_fmap f
+    {-# INLINE (<$) #-}
+    (<$) a = f_fmap (const a)
+
+{-# INLINE [1] f_fmap #-}
+f_fmap :: Functor m => (a -> b) -> Fold i m a -> Fold i m b
+f_fmap f (Fold s0 step mkOut) = Fold s0 step (fmap f . mkOut)
+
+{-# RULES
+"<trx> f_fmap/fmap" forall f g h. f_fmap f (f_fmap g h) = f_fmap (f . g) h
+    #-}
 
 class Functor f => Folding f where
     type Input f

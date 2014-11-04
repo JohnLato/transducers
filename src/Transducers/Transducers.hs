@@ -79,7 +79,7 @@ instance Functor (Transducer e i o m) where
     {-# INLINE fmap #-}
     fmap f = t_fmap f
     {-# INLINE (<$) #-}
-    a <$ t = t_fmap (const a) t
+    (<$) a = t_fmap (const a)
     -- TODO: might be good to have a special function for this case
     -- on Transducers (still should try to rewrite over Fold though)
 
@@ -165,6 +165,7 @@ tfold (Fold.Fold s0 f outf) = loop s0
 
 {-# RULES
 "<trx> fmap/tfold" forall f g. t_fmap f (tfold g) = tfold (fmap f g)
+"<trx> fmap/fmap"  forall f g h. t_fmap f (t_fmap g h) = t_fmap (f . g) h
     #-}
 
 tscanl :: (Functor m, Monad m) => Fold i m a -> Transducer e i a m ()
@@ -218,11 +219,11 @@ zip l0 r0 = loop l0 r0
 {-# NOINLINE [0] zip #-}
 
 sequence_ :: (Functor m, Monad m) => [Transducer e i o m a] -> Transducer e i o m ()
-sequence_ xs = foldr (\l r -> () <$ zip l r) (Fold.liftFold f_null) xs
+sequence_ xs = foldr (((<$) () .) . zip) (Fold.liftFold f_null) xs
 {-# INLINE sequence_ #-}
 
 {-# RULES
-"<trx> zip/fold" forall f g. zip (tfold f) (tfold g) = tfold (f_zip f g)
+"<trx> zip/fold"  forall f g. zip (tfold f) (tfold g) = tfold (f_zip f g)
     #-}
 
 -- yieldList doesn't actually need the Monad constraint, but it's necessary for the yieldListR rule to work.
