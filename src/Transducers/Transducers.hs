@@ -19,10 +19,11 @@ module Transducers.Transducers (
   await,
   tryAwait,
   panic,
-  (><>),
-  (<><),
+  feed2,
   
   -- * main API
+  (><>),
+  (<><),
   tmap,
   tfilter,
   dropWhileM,
@@ -35,6 +36,8 @@ module Transducers.Transducers (
   unfold,
   zip,
   sequence_,
+  Fold.mapM_,
+  Fold.foldM,
 
   yieldList,
   feed,
@@ -252,6 +255,18 @@ feed1 i (Trs tr0) = loop tr0
         Impure (TLift m)   -> lift m >>= loop
         Impure (Panic e m) -> panic e >> loop m
         Pure a             -> return $ return a
+
+feed2
+    :: (Functor m, Monad m)
+    => i -> Transducer e i o m a -> m ([o], Transducer e i o m a, Maybe e)
+feed2 i (Trs tr0) = loop [] tr0
+  where
+    loop os tr = case toView tr of
+        Impure (Try f)     -> return (reverse os, Trs $ f (Just i), Nothing)
+        Impure (Yield o m) -> loop (o:os) m
+        Impure (TLift m)   -> m >>= loop os
+        Impure (Panic e m) -> return (reverse os, Trs m, Just e)
+        Pure a             -> return (reverse os, return a, Nothing)
 
 -- attempt to step the transducer by performing any monadic actions
 -- TODO: generalize this to dump any 'o's somewhere
